@@ -48,20 +48,34 @@
 - [x] `internal/cli/types.go` — `CommonArgs`, config resolution, `RequireCleanRepo`
 - [x] `internal/cli/root.go` — arg parsing via `spf13/cobra`, persistent flags matching SPEC §6.1
 - [x] `internal/cli/config.go` — `config` command (§6.2 / §7 of SPEC)
-- [~] `internal/cli/submit.go` — `submit` / `export` algorithm (§13 of SPEC) — stub only
-- [~] `internal/cli/view.go` — `view` algorithm (§17 of SPEC) — stub only
-- [~] `internal/cli/land.go` — `land` algorithm (§15 of SPEC) — stub only
-- [~] `internal/cli/abandon.go` — `abandon` algorithm (§16 of SPEC) — stub only
+- [x] `internal/cli/submit.go` — `submit` / `export` algorithm (§13 of SPEC)
+- [x] `internal/cli/view.go` — `view` algorithm (§17 of SPEC)
+- [~] `internal/cli/land.go` — `land` algorithm (§15 of SPEC) — postponed
+- [~] `internal/cli/abandon.go` — `abandon` algorithm (§16 of SPEC) — postponed
 
-## Phase 4: Entrypoint & Build
+## Phase 4: Testing (stabilize submit & view)
 
-- [x] `cmd/stack-pr/main.go` — calls `cli.Execute()`
-- [x] `go build ./cmd/stack-pr` passes
-- [x] All commands + global flags render help correctly per SPEC
-- [ ] Add `Makefile` or simple build script (optional)
+- [ ] `internal/shell/shell_test.go` — quiet vs non-quiet behaviour
+- [ ] `internal/git/git_test.go` — rebase-in-progress detection, username override, branch ID extraction
+- [ ] `internal/stack/entry_test.go` — metadata parsing, branch name generation
+- [ ] `internal/config/config_test.go` — read/write roundtrip
+- [ ] Integration-style tests where feasible (mock `gh` / `git` in temp dirs)
 
-## Phase 5: Documentation & CI
+## Phase 5: Polish
 
+- [ ] Review SPEC §18–20 (cleanliness, safety, error messages, output formatting)
+- [ ] Ensure all error messages match SPEC descriptions
+- [ ] Ensure ANSI / hyperlink output matches SPEC
+- [ ] End-to-end smoke test in a real Git repo
+
+## Phase 6: Remaining Commands
+
+- [ ] `internal/cli/land.go` — implement `land` algorithm (§15 of SPEC)
+- [ ] `internal/cli/abandon.go` — implement `abandon` algorithm (§16 of SPEC)
+
+## Phase 7: Documentation & CI
+
+- [ ] Add `Makefile` or simple build script
 - [ ] Port `README.md` from Python version to Go install instructions (`go install`)
 - [ ] Port `CHANGELOG.md` (reset for Go port, keep historical context)
 - [ ] Port `LICENSE` / `CONTRIBUTING.md`
@@ -71,23 +85,8 @@
   - `gofmt -l` check
   - Build `cmd/stack-pr`
 
-## Phase 6: Testing
-
-- [ ] `internal/shell/shell_test.go` — quiet vs non-quiet behaviour
-- [ ] `internal/git/git_test.go` — rebase-in-progress detection, username override, branch ID extraction
-- [ ] `internal/stack/entry_test.go` — metadata parsing, branch name generation
-- [ ] `internal/config/config_test.go` — read/write roundtrip
-- [ ] Integration-style tests where feasible (mock `gh` / `git` in temp dirs)
-
-## Phase 7: Polish
-
-- [ ] Review SPEC §18–20 (cleanliness, safety, error messages, output formatting)
-- [ ] Ensure all error messages match SPEC descriptions
-- [ ] Ensure ANSI / hyperlink output matches SPEC
-- [ ] End-to-end smoke test in a real Git repo
-
 ---
 
 ## Currently Working On
 
-Phase 3: Implementing command RunE functions (submit, view, land, abandon)
+Phase 4: Testing — stabilizing submit & view before proceeding
