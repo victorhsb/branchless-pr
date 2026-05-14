@@ -45,8 +45,9 @@ func Execute() error {
 	cfg.Merge(defaults)
 
 	root := &cobra.Command{
-		Use:   "stack-pr",
-		Short: "Create, update, view, abandon, and land stacked GitHub pull requests.",
+		Use:     "stack-pr",
+		Short:   "Create, update, view, abandon, and land stacked GitHub pull requests.",
+		Version: Version(),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Merge defaults fresh so multiple invocations in tests work.
 			cfg.Merge(defaults)

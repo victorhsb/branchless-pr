@@ -1,15 +1,17 @@
 BIN := stack-pr
 PKG := ./cmd/stack-pr
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
+LDFLAGS := -ldflags "-X github.com/victorhsb/branchless-pr/internal/cli.version=$(VERSION)"
 
 .PHONY: all build test vet fmt fmt-check tidy clean install
 
 all: build
 
 build:
-	go build -o $(BIN) $(PKG)
+	go build $(LDFLAGS) -o $(BIN) $(PKG)
 
 install:
-	go install $(PKG)
+	go install $(LDFLAGS) $(PKG)
 
 test:
 	go test ./...
