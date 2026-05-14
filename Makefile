@@ -8,19 +8,19 @@ LDFLAGS := -ldflags "-X github.com/victorhsb/branchless-pr/internal/cli.version=
 all: build
 
 build:
-	go build $(LDFLAGS) -o $(BIN) $(PKG)
+	@go build $(LDFLAGS) -o $(BIN) $(PKG)
 
 install:
-	go install $(LDFLAGS) $(PKG)
+	@go install $(LDFLAGS) $(PKG)
 
 test:
-	go test ./...
+	@go test ./...
 
 vet:
-	go vet ./...
+	@go vet ./...
 
 fmt:
-	gofmt -w .
+	@gofmt -w .
 
 fmt-check:
 	@diff="$$(gofmt -l .)"; \
@@ -29,7 +29,7 @@ fmt-check:
 	fi
 
 tidy:
-	go mod tidy
+	@go mod tidy
 
 clean:
-	rm -f $(BIN)
+	@rm -f $(BIN)
