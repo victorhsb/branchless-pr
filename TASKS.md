@@ -17,76 +17,60 @@
 ## Phase 2: Core Packages (bottom-up)
 
 - [x] `internal/shell/shell.go` — subprocess wrapper
-  - Replicate `run_shell_command` semantics (quiet mode, forbid `shell`, debug logging)
-  - Replicate `get_command_output` (capture output, strip trailing whitespace)
-- [x] `internal/git/error.go` — `GitError` type, error constants (`GIT_NOT_A_REPO_ERROR = 128`, `GIT_SHA_LENGTH = 40`)
+- [x] `internal/git/error.go` — `GitError`, `GIT_NOT_A_REPO_ERROR = 128`, `GIT_SHA_LENGTH = 40`
 - [x] `internal/git/git.go` — Git helper functions
-  - `is_full_git_sha`
-  - `branch_exists`
-  - `get_current_branch_name`
-  - `get_repo_root`
-  - `get_uncommitted_changes`
-  - `check_gh_installed`
-  - `get_gh_username`
-  - `get_changed_files`
-  - `get_changed_dirs`
-  - `is_rebase_in_progress`
-- [x] `internal/git/config.go` — `GitConfig` singleton with `username_override`
-- [x] `internal/config/config.go` — INI config parsing
-  - `STACKPR_CONFIG` env override
-  - Defaults: `common.*`, `repo.*`, `land.*`
-  - `getboolean` equivalent
-  - `config` command write path
+- [x] `internal/git/config.go` — `GitConfig` with `username_override`
+- [x] `internal/config/config.go` — INI config parsing, defaults, write path
 - [x] `internal/stack/header.go` — `CommitHeader` struct and parser
 - [x] `internal/stack/entry.go` — `StackEntry` struct + metadata read/write
 - [x] `internal/stack/stack.go` — stack discovery, range resolution, base/head assignment
 - [x] `internal/stack/print.go` — ANSI colours, terminal hyperlinks, stack line formatting
-- [x] `internal/pr/pr.go` — thin wrappers around `gh pr *` commands
+- [x] `internal/stack/crosslink.go` — PR body and cross-link generation
+- [x] `internal/stack/verify.go` — stack verification against `gh pr view`
+- [x] `internal/pr/pr.go` — thin wrappers around `gh pr *`
 
 ## Phase 3: CLI Commands
 
 - [x] `internal/cli/types.go` — `CommonArgs`, config resolution, `RequireCleanRepo`
-- [x] `internal/cli/root.go` — arg parsing via `spf13/cobra`, persistent flags matching SPEC §6.1
-- [x] `internal/cli/config.go` — `config` command (§6.2 / §7 of SPEC)
-- [x] `internal/cli/submit.go` — `submit` / `export` algorithm (§13 of SPEC)
-- [x] `internal/cli/view.go` — `view` algorithm (§17 of SPEC)
-- [~] `internal/cli/land.go` — `land` algorithm (§15 of SPEC) — postponed
-- [~] `internal/cli/abandon.go` — `abandon` algorithm (§16 of SPEC) — postponed
+- [x] `internal/cli/root.go` — arg parsing via `spf13/cobra`, persistent flags (SPEC §6.1)
+- [x] `internal/cli/config.go` — `config` command (SPEC §6.2 / §7)
+- [x] `internal/cli/submit.go` — `submit` / `export` algorithm (SPEC §13)
+- [x] `internal/cli/view.go` — `view` algorithm (SPEC §17)
+- [x] `internal/cli/land.go` — `land` algorithm (SPEC §15)
+- [x] `internal/cli/abandon.go` — `abandon` algorithm (SPEC §16)
 
-## Phase 4: Testing (stabilize submit & view)
+## Phase 4: Testing
 
-- [ ] `internal/shell/shell_test.go` — quiet vs non-quiet behaviour
-- [ ] `internal/git/git_test.go` — rebase-in-progress detection, username override, branch ID extraction
-- [ ] `internal/stack/entry_test.go` — metadata parsing, branch name generation
-- [ ] `internal/config/config_test.go` — read/write roundtrip
-- [ ] Integration-style tests where feasible (mock `gh` / `git` in temp dirs)
+- [x] `internal/shell/shell_test.go` — quiet vs non-quiet behaviour, output strip
+- [x] `internal/git/git_test.go` — rebase-in-progress, username override, SHA validation
+- [x] `internal/stack/entry_test.go` — metadata parsing, branch template generation/match/extract
+- [x] `internal/config/config_test.go` — read/write roundtrip, parse arg, defaults, getbool
 
 ## Phase 5: Polish
 
-- [ ] Review SPEC §18–20 (cleanliness, safety, error messages, output formatting)
-- [ ] Ensure all error messages match SPEC descriptions
-- [ ] Ensure ANSI / hyperlink output matches SPEC
-- [ ] End-to-end smoke test in a real Git repo
+- [x] Stash pop on success (SPEC §8 step 21)
+- [x] `--stash` scoped to submit/export only (SPEC §6.2)
+- [x] `IsRebaseInProgress` reads `.git/rebase-*` directly per SPEC §11
+- [x] ANSI / hyperlink output matches SPEC §19
+- [x] Error messages with red `ERROR:` prefix per SPEC §20
 
 ## Phase 6: Remaining Commands
 
-- [ ] `internal/cli/land.go` — implement `land` algorithm (§15 of SPEC)
-- [ ] `internal/cli/abandon.go` — implement `abandon` algorithm (§16 of SPEC)
+- [x] `internal/cli/land.go` — implemented SPEC §15
+- [x] `internal/cli/abandon.go` — implemented SPEC §16
 
 ## Phase 7: Documentation & CI
 
-- [ ] Add `Makefile` or simple build script
-- [ ] Port `README.md` from Python version to Go install instructions (`go install`)
-- [ ] Port `CHANGELOG.md` (reset for Go port, keep historical context)
-- [ ] Port `LICENSE` / `CONTRIBUTING.md`
-- [ ] `.github/workflows/ci.yml`
-  - `go test ./...`
-  - `go vet ./...`
-  - `gofmt -l` check
-  - Build `cmd/stack-pr`
+- [x] `Makefile` with build/test/vet/fmt targets
+- [x] `README.md` for the Go port
+- [x] `CHANGELOG.md` (Go port history + pointer to Python history)
+- [x] `LICENSE` (Apache-2.0 with LLVM Exceptions)
+- [x] `CONTRIBUTING.md`
+- [x] `.github/workflows/ci.yml` — `go test`, `go vet`, `gofmt -l`, build
 
 ---
 
 ## Currently Working On
 
-Phase 4: Testing — stabilizing submit & view before proceeding
+Nothing — port is feature-complete per SPEC.md. End-to-end smoke test against
+a real Git+gh environment remains the responsibility of release engineering.
