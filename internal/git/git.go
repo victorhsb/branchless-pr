@@ -179,14 +179,15 @@ func GetChangedDirs(base string, repoDir ...string) (map[string]struct{}, error)
 }
 
 // IsRebaseInProgress reports whether a rebase is currently active.
+// Per SPEC §11, with repoDir it checks repoDir/.git/rebase-*;
+// without it, it checks ./.git/rebase-*.
 func IsRebaseInProgress(repoDir ...string) bool {
-	root, err := RepoRoot(repoDir...)
-	if err != nil {
-		return false
+	gitDir := ".git"
+	if len(repoDir) > 0 && repoDir[0] != "" {
+		gitDir = filepath.Join(repoDir[0], ".git")
 	}
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		p := filepath.Join(root, ".git", name)
-		if _, err := os.Stat(p); err == nil {
+		if _, err := os.Stat(filepath.Join(gitDir, name)); err == nil {
 			return true
 		}
 	}
