@@ -52,7 +52,11 @@ func ResolveSharedArgs(cfg *config.Config, base, head, remote, target string, hy
 	}
 
 	ca.Base = base
-	ca.Head = head
+	if head != "" {
+		ca.Head = head
+	} else {
+		ca.Head = "HEAD"
+	}
 
 	if hyperlinks != nil {
 		ca.Hyperlinks = *hyperlinks

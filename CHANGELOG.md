@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.1 – 2026-05-14
+
+- Fixed default `--head` resolution so base deduction uses `HEAD` when no head
+  revision is supplied.
+
 ## v1.0.0 – 2026-05-14
 
 - Initial Go port of the Python `stack-pr` tool.
