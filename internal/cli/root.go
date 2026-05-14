@@ -173,8 +173,6 @@ func Execute() error {
 	root.PersistentFlags().BoolVar(&flagShowTips, "show-tips", true, "Show post-command guidance")
 	root.PersistentFlags().BoolVar(&flagNoShowTips, "no-show-tips", false, "Suppress post-command guidance")
 
-	root.PersistentFlags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and pop afterward")
-
 	// Add subcommands
 	root.AddCommand(submitCmd()) // submit has alias "export"
 	root.AddCommand(viewCmd())
@@ -186,7 +184,7 @@ func Execute() error {
 	}
 
 	root.AddCommand(abandonCmd())
-	root.AddCommand(configCmd(cfg))
+	root.AddCommand(configCmd())
 
 	// No command: show help and exit
 	root.SetArgs([]string{"--help"})

@@ -16,7 +16,6 @@ func submitCmd() *cobra.Command {
 		keepBody  bool
 		draftMask string
 		reviewer  string
-		stash     bool
 	)
 
 	cmd := &cobra.Command{
@@ -25,8 +24,6 @@ func submitCmd() *cobra.Command {
 		Long:    `Creates or updates stacked PRs for commits in BASE..HEAD.`,
 		Aliases: []string{"export"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Stash flag is handled in PersistentPreRunE via the global flagStash.
-			_ = stash // suppress unused - same global flag is read in root.go
 			return runSubmit(cmd, draft, keepBody, draftMask, reviewer)
 		},
 	}
@@ -35,7 +32,7 @@ func submitCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&draft, "draft", "d", false, "Create all new PRs as draft")
 	cmd.Flags().StringVar(&draftMask, "draft-bitmask", "", "Per-PR draft bitmask; chars must be 0 or 1")
 	cmd.Flags().StringVar(&reviewer, "reviewer", "", "Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer")
-	cmd.Flags().BoolVarP(&stash, "stash", "s", false, "Stash uncommitted changes before submitting and pop afterward")
+	cmd.Flags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and pop afterward")
 
 	return cmd
 }
@@ -54,8 +51,17 @@ func runSubmit(cmd *cobra.Command, draft, keepBody bool, draftBitmask, reviewer 
 	return WithRecovery(app, func() error { return submitImpl(app, draft, keepBody, draftBitmask, reviewer) })
 }
 
-func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer string) error {
+func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer string) (err error) {
 	fmt.Println(stack.Headerf("SUBMIT"))
+
+	// SPEC §8 step 21: pop stash on success (recovery handles error path).
+	defer func() {
+		if err == nil && app.StashCreated {
+			if perr := git.StashPop(); perr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to pop stash: %v\n", perr)
+			}
+		}
+	}()
 
 	// 2. Rebase guard.
 	if git.IsRebaseInProgress() {

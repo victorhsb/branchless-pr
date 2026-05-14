@@ -8,7 +8,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/config"
 )
 
-func configCmd(cfg *config.Config) *cobra.Command {
+func configCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "config <section>.<key>=<value>",
 		Short: "Create or update a config setting.",
