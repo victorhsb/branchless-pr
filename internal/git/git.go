@@ -203,6 +203,36 @@ func MergeBase(a, b string) (string, error) {
 	return out, nil
 }
 
+// BranchlessStackHead returns the top commit in the current git-branchless
+// stack. The boolean is false when git-branchless is unavailable, the repo is
+// not initialized for branchless, or the command returns no valid commits.
+func BranchlessStackHead(repoDir ...string) (string, bool) {
+	opts := shell.RunOpts{Quiet: true, Check: false}
+	if len(repoDir) > 0 && repoDir[0] != "" {
+		opts.Dir = repoDir[0]
+	}
+	out, _, err := shell.Run([]string{"git", "branchless", "query", "-r", "stack()"}, opts)
+	if err != nil {
+		return "", false
+	}
+
+	var top string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !IsFullSHA(line) {
+			return "", false
+		}
+		top = line
+	}
+	if top == "" {
+		return "", false
+	}
+	return top, true
+}
+
 // IsAncestor reports whether a is an ancestor of b.
 func IsAncestor(a, b string) (bool, error) {
 	_, _, err := shell.Run(

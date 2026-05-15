@@ -60,7 +60,7 @@ stack-pr abandon
 |---|---|
 | `-R, --remote` | Remote name (default `origin`). |
 | `-B, --base` | Local base revision (default merge-base). |
-| `-H, --head` | Local head revision (default `HEAD`). |
+| `-H, --head` | Local head revision (default: top of current git-branchless stack when available, otherwise `HEAD`). |
 | `-T, --target` | Remote target branch (default `main`). |
 | `--hyperlinks` / `--no-hyperlinks` | Enable terminal hyperlinks. |
 | `-V, --verbose` | Verbose subprocess output. |

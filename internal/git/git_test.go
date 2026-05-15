@@ -38,6 +38,44 @@ func TestUsernameOverride(t *testing.T) {
 	}
 }
 
+func TestBranchlessStackHeadReturnsTopCommit(t *testing.T) {
+	bin := t.TempDir()
+	fakeGit := filepath.Join(bin, "git")
+	const bottom = "1111111111111111111111111111111111111111"
+	const top = "2222222222222222222222222222222222222222"
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = branchless ] && [ \"$2\" = query ] && [ \"$3\" = -r ] && [ \"$4\" = 'stack()' ]; then\n" +
+		"  printf '%s\\n%s\\n' " + bottom + " " + top + "\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	got, ok := BranchlessStackHead()
+	if !ok {
+		t.Fatalf("expected branchless stack head")
+	}
+	if got != top {
+		t.Fatalf("BranchlessStackHead = %q, want %q", got, top)
+	}
+}
+
+func TestBranchlessStackHeadReturnsFalseWhenUnavailable(t *testing.T) {
+	bin := t.TempDir()
+	fakeGit := filepath.Join(bin, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if got, ok := BranchlessStackHead(); ok || got != "" {
+		t.Fatalf("BranchlessStackHead = %q, %v; want empty, false", got, ok)
+	}
+}
+
 func TestIsRebaseInProgressDetectsRebaseMerge(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {

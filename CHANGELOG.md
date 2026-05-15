@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.0.2 – 2026-05-15
+
+- Default `--head` to the top commit of the current git-branchless stack when
+  available, so submitting from a middle commit includes upward descendants.
+
 ## v1.0.1 – 2026-05-14
 
 - Fixed default `--head` resolution so base deduction uses `HEAD` when no head

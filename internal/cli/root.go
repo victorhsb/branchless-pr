@@ -71,6 +71,7 @@ func Execute() error {
 				t := false
 				showTips = &t
 			}
+			headExplicit := cmd.Flags().Changed("head")
 
 			ca := ResolveSharedArgs(cfg, flagBase, flagHead, flagRemote, flagTarget, hyperlinks, verbose, flagBranchTemplate, showTips)
 
@@ -100,6 +101,16 @@ func Execute() error {
 			origBranch, err := git.CurrentBranchName()
 			if err != nil {
 				return err
+			}
+
+			// When running in a git-branchless stack, HEAD may point at a middle
+			// commit while higher commits are descendants. The original stack-pr
+			// discovers BASE..HEAD, so use the branchless stack top as the default
+			// head unless the user explicitly supplied --head.
+			if !headExplicit {
+				if branchlessHead, ok := git.BranchlessStackHead(repoRoot); ok {
+					ca.Head = branchlessHead
+				}
 			}
 
 			// Username
