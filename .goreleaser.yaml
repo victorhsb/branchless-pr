@@ -1,0 +1,55 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: stack-pr
+    main: ./cmd/stack-pr
+    binary: stack-pr
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/victorhsb/branchless-pr/internal/cli.version={{.Version}}
+
+archives:
+  - id: stack-pr
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github-native
+
+brews:
+  - name: stack-pr
+    repository:
+      owner: victorhsb
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/victorhsb/branchless-pr
+    description: CLI for stacked GitHub PRs
+    license: Apache-2.0
+    test: |
+      system "#{bin}/stack-pr", "version"

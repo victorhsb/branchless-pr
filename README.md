@@ -6,11 +6,31 @@ A stack is the ordered list of local commits in a Git revision range (`BASE..HEA
 
 ## Install
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew tap victorhsb/tap
+brew install stack-pr
+```
+
+### Docker
+
+```bash
+docker pull ghcr.io/victorhsb/branchless-pr:latest
+docker run --rm ghcr.io/victorhsb/branchless-pr:latest version
+```
+
+### Pre-built binaries
+
+Download from [Releases](https://github.com/victorhsb/branchless-pr/releases). Extract and place `stack-pr` in your `$PATH`.
+
+### Go install
+
 ```bash
 go install github.com/victorhsb/branchless-pr/cmd/stack-pr@latest
 ```
 
-Or build from source:
+### Build from source
 
 ```bash
 git clone https://github.com/victorhsb/branchless-pr
@@ -56,26 +76,26 @@ stack-pr abandon
 
 ## Shared options
 
-| Flag | Description |
-|---|---|
-| `-R, --remote` | Remote name (default `origin`). |
-| `-B, --base` | Local base revision (default merge-base). |
-| `-H, --head` | Local head revision (default: top of current git-branchless stack when available, otherwise `HEAD`). |
-| `-T, --target` | Remote target branch (default `main`). |
-| `--hyperlinks` / `--no-hyperlinks` | Enable terminal hyperlinks. |
-| `-V, --verbose` | Verbose subprocess output. |
-| `--branch-name-template` | Generated branch template (default `$USERNAME/stack`). |
-| `--show-tips` / `--no-show-tips` | Post-command guidance. |
+| Flag                               | Description                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `-R, --remote`                     | Remote name (default `origin`).                                                                      |
+| `-B, --base`                       | Local base revision (default merge-base).                                                            |
+| `-H, --head`                       | Local head revision (default: top of current git-branchless stack when available, otherwise `HEAD`). |
+| `-T, --target`                     | Remote target branch (default `main`).                                                               |
+| `--hyperlinks` / `--no-hyperlinks` | Enable terminal hyperlinks.                                                                          |
+| `-V, --verbose`                    | Verbose subprocess output.                                                                           |
+| `--branch-name-template`           | Generated branch template (default `$USERNAME/stack`).                                               |
+| `--show-tips` / `--no-show-tips`   | Post-command guidance.                                                                               |
 
 ## Submit-only options
 
-| Flag | Description |
-|---|---|
-| `--keep-body` | Preserve current PR body after the stack TOC. |
-| `-d, --draft` | Create new PRs as draft. |
-| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`). |
-| `--reviewer` | Reviewer list. |
-| `-s, --stash` | Stash uncommitted changes during submit. |
+| Flag              | Description                                   |
+| ----------------- | --------------------------------------------- |
+| `--keep-body`     | Preserve current PR body after the stack TOC. |
+| `-d, --draft`     | Create new PRs as draft.                      |
+| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`).            |
+| `--reviewer`      | Reviewer list.                                |
+| `-s, --stash`     | Stash uncommitted changes during submit.      |
 
 ## Configuration
 
