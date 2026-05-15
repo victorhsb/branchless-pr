@@ -19,7 +19,11 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w -X github.com/victorhsb/branchless-pr/internal/cli.version={{.Version}}
+      - -s -w
+      - -X github.com/victorhsb/branchless-pr/internal/cli.version={{.Version}}
+
+checksum:
+  name_template: checksums.txt
 
 archives:
   - id: stack-pr
@@ -36,9 +40,6 @@ archives:
       - README.md
       - LICENSE
 
-checksum:
-  name_template: checksums.txt
-
 changelog:
   use: github-native
 
@@ -53,3 +54,31 @@ brews:
     license: Apache-2.0
     test: |
       system "#{bin}/stack-pr", "version"
+
+# Cosign keyless signing (Github OIDC)
+signs:
+  - cmd: cosign
+    env:
+      - COSIGN_YES=true
+      - COSIGN_EXPERIMENTAL=1
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+    artifacts: all
+
+# Docker signing (just the image manifest, not each layer)
+docker_signs:
+  - cmd: cosign
+    env:
+      - COSIGN_YES=true
+      - COSIGN_EXPERIMENTAL=1
+    args:
+      - "sign"
+      - "${artifact}"
+    artifacts: manifests
+
+snapshot:
+  version_template: "{{.Version}}-next"
