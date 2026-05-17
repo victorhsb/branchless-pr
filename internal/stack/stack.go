@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -102,6 +103,11 @@ func (st Stack) PrintStack(links, color bool) {
 	for _, e := range st.Reverse() {
 		fmt.Println(e.PrettyLine(links, color))
 	}
+}
+
+// ToJSON returns the stack newest-to-oldest in the machine-readable view schema.
+func (st Stack) ToJSON() ([]byte, error) {
+	return json.Marshal(st.Reverse())
 }
 
 // IsEmpty reports whether the stack has no entries.

@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -20,6 +21,44 @@ type Entry struct {
 	headBranch string // generated branch name
 	baseBranch string // target branch for PR
 	IsTmpDraft bool   // true if the PR was temporarily made draft during submit
+}
+
+// MarshalJSON emits the flat representation consumed by machine-readable views.
+func (e *Entry) MarshalJSON() ([]byte, error) {
+	prNumber := 0
+	if e.HasPR() {
+		var err error
+		prNumber, err = e.PRNumber()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	type jsonEntry struct {
+		Commit      string `json:"commit"`
+		ShortSHA    string `json:"short_sha"`
+		Title       string `json:"title"`
+		Author      string `json:"author"`
+		AuthorName  string `json:"author_name"`
+		AuthorEmail string `json:"author_email"`
+		PRURL       string `json:"pr_url"`
+		PRNumber    int    `json:"pr_number"`
+		HeadBranch  string `json:"head_branch"`
+		BaseBranch  string `json:"base_branch"`
+	}
+
+	return json.Marshal(jsonEntry{
+		Commit:      e.Commit.SHA,
+		ShortSHA:    e.Commit.ShortSHA(),
+		Title:       e.Commit.Title,
+		Author:      e.Commit.Author,
+		AuthorName:  e.Commit.AuthorName,
+		AuthorEmail: e.Commit.AuthorEmail,
+		PRURL:       e.pr,
+		PRNumber:    prNumber,
+		HeadBranch:  e.headBranch,
+		BaseBranch:  e.baseBranch,
+	})
 }
 
 // HasPR reports whether an associated PR is known.

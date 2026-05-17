@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.0 - 2026-05-17
+
+- Added machine-readable JSON output for `stack-pr view` via `--format json`.
+
 ## v1.0.2 – 2026-05-15
 
 - Default `--head` to the top commit of the current git-branchless stack when

@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"encoding/json"
 	"testing"
 )
 
@@ -97,5 +98,50 @@ func TestMetadataLineFormat(t *testing.T) {
 	want := "\nstack-info: PR: 99, branch: alice/stack/1"
 	if got != want {
 		t.Fatalf("MetadataLine = %q, want %q", got, want)
+	}
+}
+
+func TestEntryMarshalJSONProducesFlatShape(t *testing.T) {
+	e := &Entry{
+		Commit: &Header{
+			SHA:         "0123456789abcdef0123456789abcdef01234567",
+			Title:       "Add JSON output",
+			Author:      "Alice Example <alice@example.com>",
+			AuthorName:  "Alice Example",
+			AuthorEmail: "alice@example.com",
+		},
+		headBranch: "alice/stack/1",
+		baseBranch: "main",
+	}
+
+	got, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(got, &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]any{
+		"commit":       "0123456789abcdef0123456789abcdef01234567",
+		"short_sha":    "01234567",
+		"title":        "Add JSON output",
+		"author":       "Alice Example <alice@example.com>",
+		"author_name":  "Alice Example",
+		"author_email": "alice@example.com",
+		"pr_url":       "",
+		"pr_number":    float64(0),
+		"head_branch":  "alice/stack/1",
+		"base_branch":  "main",
+	}
+	if len(payload) != len(want) {
+		t.Fatalf("MarshalJSON fields = %d, want %d", len(payload), len(want))
+	}
+	for key, wantValue := range want {
+		if gotValue := payload[key]; gotValue != wantValue {
+			t.Fatalf("MarshalJSON[%q] = %#v, want %#v", key, gotValue, wantValue)
+		}
 	}
 }

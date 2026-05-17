@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/git"
@@ -9,7 +11,9 @@ import (
 )
 
 func viewCmd() *cobra.Command {
-	return &cobra.Command{
+	var format string
+
+	cmd := &cobra.Command{
 		Use:   "view",
 		Short: "Safely inspect the current stack.",
 		Long:  `Does not modify commits or push branches. May fetch/prune the remote.`,
@@ -18,12 +22,14 @@ func viewCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("missing app context")
 			}
-			return runView(app)
+			return runView(app, format)
 		},
 	}
+	cmd.Flags().StringVar(&format, "format", "text", `Output format: "text" or "json"`)
+	return cmd
 }
 
-func runView(app *AppContext) error {
+func runView(app *AppContext, format string) error {
 	fmt.Println(stack.Headerf("VIEW"))
 
 	// 2. Warn if base is auto-updatable.
@@ -65,7 +71,9 @@ func runView(app *AppContext) error {
 
 	// 8. Print stack newest-to-oldest.
 	fmt.Println("Stack:")
-	st.PrintStack(app.Args.Hyperlinks, true)
+	if err := writeViewStack(os.Stdout, st, format, app.Args.Hyperlinks); err != nil {
+		return err
+	}
 	fmt.Println()
 
 	// 9. Print tips.
@@ -76,6 +84,25 @@ func runView(app *AppContext) error {
 	// 10. Success.
 	fmt.Println(stack.Greenf("SUCCESS!"))
 	return nil
+}
+
+func writeViewStack(w io.Writer, st stack.Stack, format string, links bool) error {
+	switch format {
+	case "text":
+		for _, e := range st.Reverse() {
+			fmt.Fprintln(w, e.PrettyLine(links, true))
+		}
+		return nil
+	case "json":
+		payload, err := st.ToJSON()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(w, string(payload))
+		return nil
+	default:
+		return fmt.Errorf("unknown view format %q: expected \"text\" or \"json\"", format)
+	}
 }
 
 // maybeWarnBaseBehind returns a non-empty warning string when the local base is
