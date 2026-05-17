@@ -16,15 +16,18 @@ func submitCmd() *cobra.Command {
 		keepBody  bool
 		draftMask string
 		reviewer  string
+		dryRun    bool
 	)
 
 	cmd := &cobra.Command{
-		Use:     "submit",
-		Short:   "Create or update the stack of PRs.",
-		Long:    `Creates or updates stacked PRs for commits in BASE..HEAD.`,
+		Use:   "submit",
+		Short: "Create or update the stack of PRs.",
+		Long: `Creates or updates stacked PRs for commits in BASE..HEAD.
+
+Use --dry-run to preview the planned actions without applying any local Git or GitHub changes.`,
 		Aliases: []string{"export"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSubmit(cmd, draft, keepBody, draftMask, reviewer)
+			return runSubmit(cmd, dryRun, draft, keepBody, draftMask, reviewer)
 		},
 	}
 
@@ -33,11 +36,12 @@ func submitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&draftMask, "draft-bitmask", "", "Per-PR draft bitmask; chars must be 0 or 1")
 	cmd.Flags().StringVar(&reviewer, "reviewer", "", "Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer")
 	cmd.Flags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and pop afterward")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview submit/export actions without applying local Git or GitHub changes")
 
 	return cmd
 }
 
-func runSubmit(cmd *cobra.Command, draft, keepBody bool, draftBitmask, reviewer string) error {
+func runSubmit(cmd *cobra.Command, dryRun, draft, keepBody bool, draftBitmask, reviewer string) error {
 	app, ok := FromContext(cmd.Context())
 	if !ok {
 		return fmt.Errorf("missing app context")
@@ -48,11 +52,17 @@ func runSubmit(cmd *cobra.Command, draft, keepBody bool, draftBitmask, reviewer 
 		reviewer = DefaultReviewer(app.Config, reviewer)
 	}
 
-	return WithRecovery(app, func() error { return submitImpl(app, draft, keepBody, draftBitmask, reviewer) })
+	return WithRecovery(app, func() error {
+		return submitImpl(app, dryRun, draft, keepBody, draftBitmask, reviewer)
+	})
 }
 
-func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer string) (err error) {
-	fmt.Println(stack.Headerf("SUBMIT"))
+func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, reviewer string) (err error) {
+	if dryRun {
+		fmt.Println(stack.Headerf("DRY RUN: SUBMIT"))
+	} else {
+		fmt.Println(stack.Headerf("SUBMIT"))
+	}
 
 	// SPEC §8 step 21: pop stash on success (recovery handles error path).
 	defer func() {
@@ -68,9 +78,11 @@ func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer st
 		return fmt.Errorf("ERROR: Rebase in progress. Finish or abort it before submitting.")
 	}
 
-	// 4. Optionally fast-forward local base.
-	if err := maybeRebaseBase(app); err != nil {
-		return err
+	// 4. Optionally fast-forward local base (skipped in dry-run; mutating).
+	if !dryRun {
+		if err := maybeRebaseBase(app); err != nil {
+			return err
+		}
 	}
 
 	// 5. Discover stack.
@@ -82,6 +94,9 @@ func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer st
 	// 6. Empty stack.
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
+		if dryRun {
+			fmt.Println(dryRunNoChangesNote)
+		}
 		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
@@ -95,28 +110,9 @@ func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer st
 	}
 
 	// 7. Validate draft bitmask.
-	isDraft := make([]bool, len(st))
-	if draftBitmask != "" {
-		if len(draftBitmask) != len(st) {
-			fmt.Fprintf(os.Stderr, "draft bitmask length (%d) does not match stack length (%d)\n", len(draftBitmask), len(st))
-			return nil
-		}
-		for i, c := range draftBitmask {
-			switch c {
-			case '1':
-				isDraft[i] = true
-			case '0':
-				isDraft[i] = false
-			default:
-				fmt.Fprintf(os.Stderr, "draft bitmask must contain only 0 or 1, got %q at position %d\n", string(c), i)
-				return nil
-			}
-		}
-	}
-	if draft {
-		for i := range isDraft {
-			isDraft[i] = true
-		}
+	isDraft, ok := resolveDraftFlags(draft, draftBitmask, len(st))
+	if !ok {
+		return nil
 	}
 
 	// 8. Initialize local branches.
@@ -127,14 +123,22 @@ func submitImpl(app *AppContext, draft, keepBody bool, draftBitmask, reviewer st
 	if err := st.AssignHeads(tmpl, app.Username, app.OrigBranch, app.Args.Remote); err != nil {
 		return err
 	}
+
+	// 9. Compute base branches (pure assignment, no git ops).
+	st.AssignBases(app.Args.Target)
+
+	// Dry-run: print plan and exit before any mutating operation.
+	if dryRun {
+		printDryRunPlan(st, needsMeta, isDraft)
+		fmt.Println(stack.Greenf("SUCCESS!"))
+		return nil
+	}
+
 	for _, e := range st {
 		if err := git.Checkout(e.Commit.SHA, e.Head()); err != nil {
 			return err
 		}
 	}
-
-	// 9. Compute base branches.
-	st.AssignBases(app.Args.Target)
 
 	// 10. Does the original branch need rebasing on top later?
 	needsBranchRebase := false
@@ -331,4 +335,69 @@ func printSubmitTips(st stack.Stack) {
 	} else {
 		fmt.Println("Some PRs could not be created. Check the output above for errors.")
 	}
+}
+
+const dryRunNoChangesNote = "No local Git changes, remote pushes, or GitHub PR changes were made."
+
+// resolveDraftFlags computes the per-entry draft array from the --draft and
+// --draft-bitmask flags. It mirrors the real-submit validation: on invalid
+// input it prints an error to stderr and returns ok=false so the caller
+// returns nil (matching the existing non-fatal exit behavior).
+func resolveDraftFlags(draft bool, draftBitmask string, n int) ([]bool, bool) {
+	isDraft := make([]bool, n)
+	if draftBitmask != "" {
+		if len(draftBitmask) != n {
+			fmt.Fprintf(os.Stderr, "draft bitmask length (%d) does not match stack length (%d)\n", len(draftBitmask), n)
+			return nil, false
+		}
+		for i, c := range draftBitmask {
+			switch c {
+			case '1':
+				isDraft[i] = true
+			case '0':
+				isDraft[i] = false
+			default:
+				fmt.Fprintf(os.Stderr, "draft bitmask must contain only 0 or 1, got %q at position %d\n", string(c), i)
+				return nil, false
+			}
+		}
+	}
+	if draft {
+		for i := range isDraft {
+			isDraft[i] = true
+		}
+	}
+	return isDraft, true
+}
+
+// printDryRunPlan emits a human-readable plan of the submit/export actions
+// that would be performed for the given stack. The stack is printed in
+// bottom-to-top order to match real submit ordering.
+func printDryRunPlan(st stack.Stack, needsMeta, isDraft []bool) {
+	fmt.Println()
+	fmt.Println("Planned actions:")
+	for i, e := range st {
+		action := "create PR"
+		if e.HasPR() {
+			action = "update PR"
+		}
+		fmt.Printf("  %d. %s\n", i+1, action)
+		fmt.Printf("     title: %s\n", e.Commit.Title)
+		fmt.Printf("     head:  %s\n", e.Head())
+		fmt.Printf("     base:  %s\n", e.Base())
+		if e.HasPR() {
+			fmt.Printf("     PR:    %s\n", e.PR())
+		} else {
+			draftLabel := "ready"
+			if isDraft[i] {
+				draftLabel = "draft"
+			}
+			fmt.Printf("     draft: %s\n", draftLabel)
+		}
+		if needsMeta[i] {
+			fmt.Println("     metadata: would add stack-info commit metadata")
+		}
+	}
+	fmt.Println()
+	fmt.Println(dryRunNoChangesNote)
 }

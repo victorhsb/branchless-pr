@@ -133,13 +133,17 @@ func Execute() error {
 				return nil
 			}
 
-			// Stash (submit/export only, before clean check)
+			// Stash (submit/export only, before clean check). Skipped in dry-run
+			// mode because stash save/pop mutates local Git state.
 			if (cmd.Name() == "submit" || cmd.Name() == "export") && flagStash {
-				stashed, err := git.StashSave("stack-pr auto-stash")
-				if err != nil {
-					return fmt.Errorf("failed to stash changes: %w", err)
+				dryRun, _ := cmd.Flags().GetBool("dry-run")
+				if !dryRun {
+					stashed, err := git.StashSave("stack-pr auto-stash")
+					if err != nil {
+						return fmt.Errorf("failed to stash changes: %w", err)
+					}
+					appCtx.StashCreated = stashed
 				}
-				appCtx.StashCreated = stashed
 			}
 
 			// Require clean repo (all except view/config)

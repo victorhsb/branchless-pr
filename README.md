@@ -89,13 +89,23 @@ stack-pr abandon
 
 ## Submit-only options
 
-| Flag              | Description                                   |
-| ----------------- | --------------------------------------------- |
-| `--keep-body`     | Preserve current PR body after the stack TOC. |
-| `-d, --draft`     | Create new PRs as draft.                      |
-| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`).            |
-| `--reviewer`      | Reviewer list.                                |
-| `-s, --stash`     | Stash uncommitted changes during submit.      |
+| Flag              | Description                                                                                  |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `--keep-body`     | Preserve current PR body after the stack TOC.                                                |
+| `-d, --draft`     | Create new PRs as draft.                                                                     |
+| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`).                                                           |
+| `--reviewer`      | Reviewer list.                                                                               |
+| `-s, --stash`     | Stash uncommitted changes during submit. Ignored under `--dry-run`.                          |
+| `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes.                  |
+
+### Previewing with `--dry-run`
+
+`stack-pr submit --dry-run` (and its alias `stack-pr export --dry-run`) prints
+the plan that a real submit would execute — per stack entry: the action
+(create or update PR), commit title, generated head branch, computed base
+branch, existing PR URL when present, draft state for new PRs, and whether
+stack metadata would be added to the commit. No local Git mutations, remote
+pushes, or GitHub PR writes are performed.
 
 ## Configuration
 
