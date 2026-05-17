@@ -2,6 +2,7 @@
 
 ## v1.1.0 - 2026-05-17
 
+- Added `--dry-run` support to `stack-pr submit` / `export`.
 - Added machine-readable JSON output for `stack-pr view` via `--format json`.
 
 ## v1.0.2 – 2026-05-15

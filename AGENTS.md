@@ -46,3 +46,5 @@ targets the generated branch for the previous commit.
 - **Go idioms first** — explicit error returns, small packages, table-driven
   tests.
 - **No external GitHub SDK** — `gh` CLI handles auth and API.
+- **Changelog entries are user-facing** — document shipped behavior only; do
+  not include OpenSpec workflow or archive bookkeeping.
