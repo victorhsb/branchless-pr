@@ -2,7 +2,7 @@ package cli
 
 // version is set at build time via -ldflags.
 // Default matches the latest tagged release.
-var version = "1.1.0"
+var version = "1.3.1"
 
 // Version returns the current CLI version string.
 func Version() string {
