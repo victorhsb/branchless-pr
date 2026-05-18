@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.1 - 2026-05-17
+
+- Fixed `stack-pr submit` / `export` aborting after creating a PR when `gh pr create` output was not captured, preventing commit metadata updates.
+
 ## v1.1.0 - 2026-05-17
 
 - Added `--dry-run` support to `stack-pr submit` / `export`.
