@@ -43,18 +43,6 @@ archives:
 changelog:
   use: github-native
 
-brews:
-  - name: stack-pr
-    repository:
-      owner: victorhsb
-      name: homebrew-tap
-    directory: Formula
-    homepage: https://github.com/victorhsb/branchless-pr
-    description: CLI for stacked GitHub PRs
-    license: Apache-2.0
-    test: |
-      system "#{bin}/stack-pr", "version"
-
 # Cosign keyless signing (Github OIDC)
 signs:
   - cmd: cosign
@@ -68,17 +56,6 @@ signs:
       - "--output-signature=${signature}"
       - "${artifact}"
     artifacts: all
-
-# Docker signing (just the image manifest, not each layer)
-docker_signs:
-  - cmd: cosign
-    env:
-      - COSIGN_YES=true
-      - COSIGN_EXPERIMENTAL=1
-    args:
-      - "sign"
-      - "${artifact}"
-    artifacts: manifests
 
 snapshot:
   version_template: "{{.Version}}-next"
