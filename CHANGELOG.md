@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## v1.3.2 – 2026-05-18
 
+- Fixed `git rev-list --header` parsing to split commits on NUL bytes (`0x00`) instead of
+  scanning for 40-character SHA lines. Multi-commit stacks were previously truncated to a
+  single commit in `stack.Discover` and in `stack-pr agent diagnose`.
 - Removed command banners, trailing `SUCCESS!` markers, and Cobra error/usage preambles from primary CLI command output.
 
 ## v1.3.0 - 2026-05-18
