@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -137,7 +138,7 @@ func TestAgentPromptRejectsUnknownFormat(t *testing.T) {
 }
 
 func TestAgentPromptRunsOutsideGitRepository(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirForTest(t, t.TempDir())
 	out, err := executeRootForTest([]string{"agent", "prompt", "overview"})
 	if err != nil {
 		t.Fatal(err)
@@ -168,4 +169,20 @@ func executeRootForTest(args []string) (string, error) {
 	cmd.SetErr(&bytes.Buffer{})
 	err = cmd.Execute()
 	return out.String(), err
+}
+
+func chdirForTest(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(old); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
 }
