@@ -73,6 +73,7 @@ stack-pr abandon
 - `stack-pr land` — squash-merge the bottom PR and rebase the rest.
 - `stack-pr abandon` — strip stack metadata and delete generated branches.
 - `stack-pr config <section>.<key>=<value>` — write a setting to `.stack-pr.cfg`.
+- `stack-pr agent prompt [topic]` — emit static, versioned guidance for LLM agents.
 
 ## Shared options
 
@@ -89,14 +90,14 @@ stack-pr abandon
 
 ## Submit-only options
 
-| Flag              | Description                                                                                  |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `--keep-body`     | Preserve current PR body after the stack TOC.                                                |
-| `-d, --draft`     | Create new PRs as draft.                                                                     |
-| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`).                                                           |
-| `--reviewer`      | Reviewer list.                                                                               |
-| `-s, --stash`     | Stash uncommitted changes during submit. Ignored under `--dry-run`.                          |
-| `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes.                  |
+| Flag              | Description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `--keep-body`     | Preserve current PR body after the stack TOC.                               |
+| `-d, --draft`     | Create new PRs as draft.                                                    |
+| `--draft-bitmask` | Per-PR draft bitmask (e.g. `010`).                                          |
+| `--reviewer`      | Reviewer list.                                                              |
+| `-s, --stash`     | Stash uncommitted changes during submit. Ignored under `--dry-run`.         |
+| `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes. |
 
 ### Previewing with `--dry-run`
 
@@ -106,6 +107,23 @@ the plan that a real submit would execute — per stack entry: the action
 branch, existing PR URL when present, draft state for new PRs, and whether
 stack metadata would be added to the commit. No local Git mutations, remote
 pushes, or GitHub PR writes are performed.
+
+## Agent prompt
+
+`stack-pr agent prompt [topic]` prints deterministic guidance for LLM agents.
+It is side-effect-free and runs without a git repository or authenticated `gh`.
+Supported topics are `overview`, `view`, `submit`, `land`, `abandon`,
+`recovery`, and `all` (the default).
+
+```bash
+stack-pr agent prompt
+stack-pr agent prompt submit
+stack-pr agent prompt submit --format json
+```
+
+Use `--format text` for markdown (default) or `--format json` for a structured
+agent-consumable envelope with versioned `id` values and command side-effect
+metadata.
 
 ## Configuration
 

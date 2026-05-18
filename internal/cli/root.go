@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/config"
@@ -30,25 +31,46 @@ var ctxKey struct{}
 
 // Execute is the entrypoint called from main.go.
 func Execute() error {
+	args := []string{"--help"}
+	if len(os.Args) > 1 {
+		args = os.Args[1:]
+	}
+	root, err := newRootCommand(args)
+	if err != nil {
+		return err
+	}
+	return root.Execute()
+}
+
+func newRootCommand(args []string) (*cobra.Command, error) {
 	cobra.EnableCommandSorting = false
 
-	// Pre-resolve config so subcommands can be conditionally added.
-	cfgPath, err := config.FilePath()
-	if err != nil {
-		return fmt.Errorf("unable to locate repo root: %w", err)
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		return fmt.Errorf("unable to load config: %w", err)
-	}
 	defaults := config.Defaults()
-	cfg.Merge(defaults)
+	cfg := defaults
+	if !argsSelectAgent(args) {
+		// Pre-resolve config so subcommands can be conditionally added.
+		cfgPath, err := config.FilePath()
+		if err != nil {
+			return nil, fmt.Errorf("unable to locate repo root: %w", err)
+		}
+		loaded, err := config.Load(cfgPath)
+		if err != nil {
+			return nil, fmt.Errorf("unable to load config: %w", err)
+		}
+		loaded.Merge(defaults)
+		cfg = loaded
+	}
 
 	root := &cobra.Command{
 		Use:     "stack-pr",
 		Short:   "Create, update, view, abandon, and land stacked GitHub pull requests.",
 		Version: Version(),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if commandInSubtree(cmd, "agent") {
+				cmd.SetContext(newContextFromApp(&AppContext{Config: cfg}))
+				return nil
+			}
+
 			// Merge defaults fresh so multiple invocations in tests work.
 			cfg.Merge(defaults)
 
@@ -201,13 +223,46 @@ func Execute() error {
 
 	root.AddCommand(abandonCmd())
 	root.AddCommand(configCmd())
+	root.AddCommand(agentCmd())
 
-	// No command: show help and exit
-	root.SetArgs([]string{"--help"})
-	if len(os.Args) > 1 {
-		root.SetArgs(os.Args[1:])
+	root.SetArgs(args)
+	return root, nil
+}
+
+func argsSelectAgent(args []string) bool {
+	valueFlags := map[string]struct{}{
+		"-R": {}, "--remote": {},
+		"-B": {}, "--base": {},
+		"-H": {}, "--head": {},
+		"-T": {}, "--target": {},
+		"--branch-name-template": {},
 	}
-	return root.Execute()
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			return false
+		}
+		if strings.HasPrefix(arg, "-") {
+			if strings.Contains(arg, "=") {
+				continue
+			}
+			if _, takesValue := valueFlags[arg]; takesValue {
+				i++
+			}
+			continue
+		}
+		return arg == "agent"
+	}
+	return false
+}
+
+func commandInSubtree(cmd *cobra.Command, name string) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func newContextFromApp(app *AppContext) context.Context {

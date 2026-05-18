@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.0 - 2026-05-17
+
+- Added `stack-pr agent prompt`, a side-effect-free command that emits static,
+  versioned guidance for LLM-agent consumption in text or JSON format.
+
 ## v1.1.1 - 2026-05-17
 
 - Fixed `stack-pr submit` / `export` aborting after creating a PR when `gh pr create` output was not captured, preventing commit metadata updates.
