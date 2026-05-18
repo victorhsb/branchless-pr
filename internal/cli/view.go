@@ -47,7 +47,11 @@ func runView(app *AppContext, format string) error {
 
 	// 4. Empty stack.
 	if st.IsEmpty() {
-		fmt.Println("Empty stack!")
+		if format == "json" {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("Empty stack!")
+		}
 		return nil
 	}
 

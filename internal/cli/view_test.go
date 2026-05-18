@@ -43,6 +43,23 @@ func TestWriteViewStackJSON(t *testing.T) {
 	}
 }
 
+func TestWriteViewStackJSONEmpty(t *testing.T) {
+	var out bytes.Buffer
+	if err := writeViewStack(&out, stack.Stack{}, "json", true); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); got != "[]\n" {
+		t.Fatalf("empty stack json = %q, want \"[]\\n\"", got)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 0 {
+		t.Fatalf("empty stack json entries = %d, want 0", len(payload))
+	}
+}
+
 func TestWriteViewStackRejectsUnknownFormat(t *testing.T) {
 	var out bytes.Buffer
 	err := writeViewStack(&out, nil, "yaml", true)
