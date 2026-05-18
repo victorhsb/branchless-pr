@@ -30,8 +30,6 @@ func viewCmd() *cobra.Command {
 }
 
 func runView(app *AppContext, format string) error {
-	fmt.Println(stack.Headerf("VIEW"))
-
 	// 2. Warn if base is auto-updatable.
 	remoteTarget := app.Args.Remote + "/" + app.Args.Target
 	if warn, err := maybeWarnBaseBehind(app.Args.Base, remoteTarget, app.Args.Head); err != nil {
@@ -50,7 +48,6 @@ func runView(app *AppContext, format string) error {
 	// 4. Empty stack.
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
-		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
 
@@ -81,8 +78,6 @@ func runView(app *AppContext, format string) error {
 		printViewTips(st)
 	}
 
-	// 10. Success.
-	fmt.Println(stack.Greenf("SUCCESS!"))
 	return nil
 }
 

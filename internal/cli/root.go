@@ -62,9 +62,11 @@ func newRootCommand(args []string) (*cobra.Command, error) {
 	}
 
 	root := &cobra.Command{
-		Use:     "stack-pr",
-		Short:   "Create, update, view, abandon, and land stacked GitHub pull requests.",
-		Version: Version(),
+		Use:           "stack-pr",
+		Short:         "Create, update, view, abandon, and land stacked GitHub pull requests.",
+		Version:       Version(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if commandInSubtree(cmd, "agent") {
 				cmd.SetContext(newContextFromApp(&AppContext{Config: cfg}))

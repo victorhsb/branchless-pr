@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Removed command banners, trailing `SUCCESS!` markers, and Cobra error/usage preambles from primary CLI command output.
+
 ## v1.3.0 - 2026-05-18
 
 - Added `stack-pr agent diagnose`, a read-only, best-effort diagnostic command

@@ -27,8 +27,6 @@ func landCmd() *cobra.Command {
 }
 
 func landImpl(app *AppContext) error {
-	fmt.Println(stack.Headerf("LAND"))
-
 	// 3. Optionally fast-forward local base.
 	if err := maybeRebaseBase(app); err != nil {
 		return err
@@ -43,7 +41,6 @@ func landImpl(app *AppContext) error {
 	// 5. Empty stack.
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
-		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
 
@@ -144,7 +141,6 @@ func landImpl(app *AppContext) error {
 		return fmt.Errorf("ERROR: Cannot rebase original branch %q: %w", app.OrigBranch, err)
 	}
 
-	fmt.Println(stack.Greenf("SUCCESS!"))
 	return nil
 }
 

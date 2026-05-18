@@ -58,12 +58,6 @@ func runSubmit(cmd *cobra.Command, dryRun, draft, keepBody bool, draftBitmask, r
 }
 
 func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, reviewer string) (err error) {
-	if dryRun {
-		fmt.Println(stack.Headerf("DRY RUN: SUBMIT"))
-	} else {
-		fmt.Println(stack.Headerf("SUBMIT"))
-	}
-
 	// SPEC §8 step 21: pop stash on success (recovery handles error path).
 	defer func() {
 		if err == nil && app.StashCreated {
@@ -97,7 +91,6 @@ func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, rev
 		if dryRun {
 			fmt.Println(dryRunNoChangesNote)
 		}
-		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
 
@@ -130,7 +123,6 @@ func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, rev
 	// Dry-run: print plan and exit before any mutating operation.
 	if dryRun {
 		printDryRunPlan(st, needsMeta, isDraft)
-		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
 
@@ -204,7 +196,7 @@ func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, rev
 	}
 
 	// 15. Print stack.
-	fmt.Println("\nStack:")
+	fmt.Println("Stack:")
 	st.PrintStack(app.Args.Hyperlinks, true)
 	fmt.Println()
 
@@ -283,8 +275,6 @@ func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, rev
 		printSubmitTips(st)
 	}
 
-	// 23. Success.
-	fmt.Println(stack.Greenf("SUCCESS!"))
 	return nil
 }
 
@@ -374,7 +364,6 @@ func resolveDraftFlags(draft bool, draftBitmask string, n int) ([]bool, bool) {
 // that would be performed for the given stack. The stack is printed in
 // bottom-to-top order to match real submit ordering.
 func printDryRunPlan(st stack.Stack, needsMeta, isDraft []bool) {
-	fmt.Println()
 	fmt.Println("Planned actions:")
 	for i, e := range st {
 		action := "create PR"

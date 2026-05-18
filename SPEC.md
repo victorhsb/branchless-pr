@@ -443,36 +443,35 @@ Failures print a specific ANSI-red error message and raise `RuntimeError`.
 
 Detailed behavior:
 
-1. Print `SUBMIT`.
-2. If a rebase is in progress, print an error and exit status 1.
-3. Record current branch.
-4. If local base can be fast-forwarded/rebased to `REMOTE/TARGET` because:
+1. If a rebase is in progress, print an error and exit status 1.
+2. Record current branch.
+3. If local base can be fast-forwarded/rebased to `REMOTE/TARGET` because:
    - `base` is ancestor of `REMOTE/TARGET`,
    - `REMOTE/TARGET` is ancestor of `head`, and
    - hashes differ,
      then run `git rebase REMOTE/TARGET base` and checkout the original branch.
-5. Load stack from `base..head`.
-6. If empty: print `Empty stack!` and `SUCCESS!`.
-7. Validate draft bitmask length if provided; on mismatch, print a message and return without success text.
-8. Initialize local branches:
+4. Load stack from `base..head`.
+5. If empty: print `Empty stack!`.
+6. Validate draft bitmask length if provided; on mismatch, print a message and return without submitting.
+7. Initialize local branches:
    - Fetch/prune remote.
    - Assign generated head branches to entries missing metadata heads.
    - For each entry, run `git checkout <commit-id> -B <entry.head>`.
-9. Compute base branches.
-10. Determine whether the original current branch needs rebasing: true if the top stack branch is an ancestor of the current branch.
-11. Reset remote base branches for existing PRs:
+8. Compute base branches.
+9. Determine whether the original current branch needs rebasing: true if the top stack branch is an ancestor of the current branch.
+10. Reset remote base branches for existing PRs:
 
 - For every entry with an existing PR, query `isDraft`.
 - If not draft, mark draft using `gh pr ready <pr> --undo` and set `is_tmp_draft=True`.
 - Set PR base to the target branch using `gh pr edit <pr> -B <target>`.
 
-12. Force-push all stack head branches in one command:
+11. Force-push all stack head branches in one command:
 
 ```bash
 git push -f <remote> <head1>:<head1> <head2>:<head2> ...
 ```
 
-13. For each stack entry without a PR, create one:
+12. For each stack entry without a PR, create one:
 
 ```bash
 gh pr create -B <base> -H <head> -t <commit-title> -F - [--reviewer <reviewer>] [--draft]
@@ -480,26 +479,25 @@ gh pr create -B <base> -H <head> -t <commit-title> -F - [--reviewer <reviewer>] 
 
 The PR body input is the full commit message. The PR reference is parsed as the last whitespace-separated token of command output.
 
-14. Verify stack metadata and GitHub state.
-15. Print the stack.
-16. Add metadata to commit messages:
+13. Verify stack metadata and GitHub state.
+14. Print the stack.
+15. Add metadata to commit messages:
 
 - For the first changed commit, checkout its head branch if no rebase is needed.
 - For later changed commits, rebase branch onto its base using `--committer-date-is-author-date`.
 - If metadata is absent, append the `stack-info` line and amend using `git commit --amend -F -`.
 - Once one commit is amended, later entries need rebasing.
 
-17. Force-push all branches again.
-18. Add cross-links and update PR titles/bodies/base branches.
-19. Restore PRs that were made temporary draft using `gh pr ready <pr>`.
-20. Rebase or checkout the original branch:
+16. Force-push all branches again.
+17. Add cross-links and update PR titles/bodies/base branches.
+18. Restore PRs that were made temporary draft using `gh pr ready <pr>`.
+19. Rebase or checkout the original branch:
 
 - If needed, `git rebase <top_branch> <current_branch> --committer-date-is-author-date`.
 - Otherwise checkout current branch.
 
-21. Delete local generated branches with `git branch -D ...` using `check=False`.
-22. Print post-export tips if enabled.
-23. Print `SUCCESS!`.
+20. Delete local generated branches with `git branch -D ...` using `check=False`.
+21. Print post-export tips if enabled.
 
 ## 14. PR cross-linking
 
@@ -538,21 +536,20 @@ gh pr edit <pr> -t <title> -F - -B <base>
 
 Detailed behavior:
 
-1. Print `LAND`.
-2. Record current branch.
-3. Optionally update local base the same way `submit` does.
-4. Load stack.
-5. If empty: print `Empty stack!` and `SUCCESS!`.
-6. Set base branches and print stack.
-7. Verify with `check_base=True`.
-8. Land the bottom-most PR:
+1. Record current branch.
+2. Optionally update local base the same way `submit` does.
+3. Load stack.
+4. If empty: print `Empty stack!`.
+5. Set base branches and print stack.
+6. Verify with `check_base=True`.
+7. Land the bottom-most PR:
    - Fetch/prune remote.
    - Checkout remote head branch locally with `git checkout REMOTE/<head> -B <head>`.
    - Set PR base to target with `gh pr edit <pr> -B <target>`.
    - Build squash merge title as `<original first commit-message line> (#<pr-number>)`.
    - Build squash body from the remaining commit message after stripping stack metadata; if empty, use one space.
    - Run `gh pr merge <pr> --squash -t <title> -F -`.
-9. If more PRs remain:
+8. If more PRs remain:
    - Print `Rebasing the rest of the stack` and those entries.
    - For each remaining entry:
      - Fetch/prune remote.
@@ -560,11 +557,10 @@ Detailed behavior:
      - Rebase branch onto `REMOTE/TARGET` with `--committer-date-is-author-date`.
      - Force-push `<head>:<head>`.
    - Set the new bottom PR base to the target branch.
-10. Checkout original branch.
-11. Delete local stack branches.
-12. If a local branch named target exists, rebase it onto `REMOTE/TARGET`.
-13. Rebase the original branch onto `REMOTE/TARGET`.
-14. Print `SUCCESS!`.
+9. Checkout original branch.
+10. Delete local stack branches.
+11. If a local branch named target exists, rebase it onto `REMOTE/TARGET`.
+12. Rebase the original branch onto `REMOTE/TARGET`.
 
 The land command does not delete remote branches directly; GitHub may delete merged PR branches depending on repository settings.
 
@@ -574,25 +570,23 @@ The land command does not delete remote branches directly; GitHub may delete mer
 
 Detailed behavior:
 
-1. Print `ABANDON`.
-2. Load stack.
-3. If empty: print `Empty stack!` and `SUCCESS!`.
-4. Record current branch.
-5. Initialize local branches for every stack commit, preserving existing metadata heads or assigning new ones if absent.
-6. Set base branches.
-7. Print stack.
-8. For each entry, strip metadata:
+1. Load stack.
+2. If empty: print `Empty stack!`.
+3. Record current branch.
+4. Initialize local branches for every stack commit, preserving existing metadata heads or assigning new ones if absent.
+5. Set base branches.
+6. Print stack.
+7. For each entry, strip metadata:
    - Remove `stack-info` from commit message.
    - First entry checks out its head branch.
    - Later entries rebase their head branch onto their base with `--committer-date-is-author-date`.
    - Amend commit message with `git commit --amend -F -`.
    - Record new hash from `git rev-parse <head>`.
-9. Rebase current branch onto the final stripped top commit hash.
-10. Delete local generated branches.
-11. Delete remote branches that:
+8. Rebase current branch onto the final stripped top commit hash.
+9. Delete local generated branches.
+10. Delete remote branches that:
     - match the configured branch name base, and
     - are heads for stack entries.
-12. Print `SUCCESS!`.
 
 Remote deletion command form:
 
@@ -606,16 +600,15 @@ git push -f <remote> :<branch1> :<branch2> ...
 
 Detailed behavior:
 
-1. Print `VIEW`.
-2. If local base appears behind remote target in the auto-updatable way, print a warning and suggested commands instead of modifying anything.
-3. Load stack.
+1. If local base appears behind remote target in the auto-updatable way, print a warning and suggested commands instead of modifying anything.
+2. Load stack.
+3. If empty: print `Empty stack!`.
 4. Assign head branches to entries missing metadata heads by scanning the remote, but do not create branches or push.
 5. Set base branches.
 6. Print stack newest-to-oldest.
 7. Print tips:
    - If every entry has PR/head/base metadata, say stack is ready to land and show update/land commands.
    - Otherwise say stack cannot be landed yet and show export command.
-8. Print `SUCCESS!`.
 
 ## 18. Cleanliness and safety rules
 
@@ -650,7 +643,7 @@ Stack lines include:
 * <short-sha> (#<pr-number or no PR>, '<head>' -> '<base>'): <commit title>
 ```
 
-The command prints high-level sections like `SUBMIT`, `VIEW`, `LAND`, `ABANDON`, `Stack:`, and `SUCCESS!`.
+Commands do not print command banners such as `SUBMIT`, `VIEW`, `LAND`, or `ABANDON`, and do not print generic success/failure markers such as `SUCCESS!`; output is limited to command results, warnings, tips, and errors. Runtime command errors are printed without Cobra's extra `Error:` or usage preambles.
 
 Verbosity:
 

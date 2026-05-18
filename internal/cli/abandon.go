@@ -25,8 +25,6 @@ func abandonCmd() *cobra.Command {
 }
 
 func abandonImpl(app *AppContext) error {
-	fmt.Println(stack.Headerf("ABANDON"))
-
 	// 2. Discover stack.
 	st, err := stack.Discover(app.Args.Base, app.Args.Head)
 	if err != nil {
@@ -36,7 +34,6 @@ func abandonImpl(app *AppContext) error {
 	// 3. Empty stack.
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
-		fmt.Println(stack.Greenf("SUCCESS!"))
 		return nil
 	}
 
@@ -118,6 +115,5 @@ func abandonImpl(app *AppContext) error {
 		}
 	}
 
-	fmt.Println(stack.Greenf("SUCCESS!"))
 	return nil
 }
