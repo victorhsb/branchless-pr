@@ -351,25 +351,13 @@ func (i *inspector) discover(base, head string) (stack.Stack, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rev-list: %w", err)
 	}
+	// git rev-list --header separates commits with NUL bytes.
 	var blocks []string
-	var current strings.Builder
-	inBlock := false
-	for _, line := range strings.Split(out, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) == 40 && isLowerSHA(trimmed) {
-			if inBlock {
-				blocks = append(blocks, current.String())
-				current.Reset()
-			}
-			inBlock = true
+	for _, block := range strings.Split(out, "\x00") {
+		block = strings.TrimSpace(block)
+		if block != "" {
+			blocks = append(blocks, strings.TrimSuffix(block, "\n"))
 		}
-		if inBlock {
-			current.WriteString(line)
-			current.WriteByte('\n')
-		}
-	}
-	if inBlock {
-		blocks = append(blocks, current.String())
 	}
 	var st stack.Stack
 	for idx := len(blocks) - 1; idx >= 0; idx-- {
@@ -380,16 +368,4 @@ func (i *inspector) discover(base, head string) (stack.Stack, error) {
 		st = append(st, &stack.Entry{Commit: h})
 	}
 	return st, nil
-}
-
-func isLowerSHA(s string) bool {
-	if len(s) != 40 {
-		return false
-	}
-	for _, c := range s {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }

@@ -28,32 +28,19 @@ func Discover(base, head string) (Stack, error) {
 	}
 
 	// Split raw output into individual commit blocks.
-	// Each block starts with a 40-char SHA line.
+	// git rev-list --header separates commits with NUL bytes.
 	var blocks []string
-	var current strings.Builder
-	var inBlock bool
-	for _, line := range strings.Split(out, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if len(trimmed) == 40 && isSHA(trimmed) {
-			if inBlock {
-				blocks = append(blocks, current.String())
-				current.Reset()
-			}
-			inBlock = true
+	for _, block := range strings.Split(out, "\x00") {
+		block = strings.TrimSpace(block)
+		if block != "" {
+			blocks = append(blocks, strings.TrimSuffix(block, "\n"))
 		}
-		if inBlock {
-			current.WriteString(line)
-			current.WriteByte('\n')
-		}
-	}
-	if inBlock {
-		blocks = append(blocks, current.String())
 	}
 
 	// Parse blocks newest-to-oldest from rev-list, then reverse.
 	var stack Stack
 	for i := len(blocks) - 1; i >= 0; i-- {
-		h, err := ParseHeader(strings.TrimSuffix(blocks[i], "\n"))
+		h, err := ParseHeader(blocks[i])
 		if err != nil {
 			return nil, fmt.Errorf("parse header: %w", err)
 		}
@@ -130,16 +117,4 @@ func (st Stack) Top() *Entry {
 		return nil
 	}
 	return st[len(st)-1]
-}
-
-func isSHA(s string) bool {
-	if len(s) != 40 {
-		return false
-	}
-	for _, c := range s {
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }
