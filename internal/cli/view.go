@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -71,7 +72,6 @@ func runView(app *AppContext, format string) error {
 	st.AssignBases(app.Args.Target)
 
 	// 8. Print stack newest-to-oldest.
-	fmt.Println("Stack:")
 	if err := writeViewStack(os.Stdout, st, format, app.Args.Hyperlinks); err != nil {
 		return err
 	}
@@ -88,6 +88,7 @@ func runView(app *AppContext, format string) error {
 func writeViewStack(w io.Writer, st stack.Stack, format string, links bool) error {
 	switch format {
 	case "text":
+		fmt.Println("Stack:")
 		for _, e := range st.Reverse() {
 			fmt.Fprintln(w, e.PrettyLine(links, true))
 		}
