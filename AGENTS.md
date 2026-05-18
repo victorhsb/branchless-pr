@@ -14,9 +14,8 @@ targets the generated branch for the previous commit.
 
 - `SPEC.md` — complete specification of the original Python tool's behavior,
   data model, algorithms, and packaging.
-- `TASKS.md` — persistent task state; updated as work progresses.
 
-## Repository Layout (proposed)
+## Repository Layout
 
 ```
 .
@@ -41,10 +40,7 @@ targets the generated branch for the previous commit.
 
 ## Key Port Decisions
 
-- **Shelling out is intentional** — we call `git` and `gh` via subprocess, just
-  like the Python version.
-- **Go idioms first** — explicit error returns, small packages, table-driven
-  tests.
+- **Shelling out is intentional** — we call `git` and `gh` via subprocess, just like the Python version.
+- **Go idioms first** — explicit error returns, small packages, table-driven tests.
 - **No external GitHub SDK** — `gh` CLI handles auth and API.
-- **Changelog entries are user-facing** — document shipped behavior only; do
-  not include OpenSpec workflow or archive bookkeeping.
+- **Changelog entries are user-facing** — document shipped behavior only; do not include OpenSpec workflow or archive bookkeeping.

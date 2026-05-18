@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(openspec --help)",
+      "Skill(openspec-propose)"
+    ]
+  }
+}

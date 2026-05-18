@@ -90,21 +90,32 @@ func Create(opts CreateOptions) (string, error) {
 	if opts.Draft {
 		args = append(args, "--draft")
 	}
-	out, _, err := shell.Run(args, shell.RunOpts{Stdin: opts.Body})
+	out, errOut, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true, Stdin: opts.Body})
 	if err != nil {
+		stderr := strings.TrimSpace(string(errOut))
+		if stderr != "" {
+			return "", fmt.Errorf("gh pr create: %w: %s", err, stderr)
+		}
 		return "", fmt.Errorf("gh pr create: %w", err)
 	}
-	// PR reference is the last whitespace-separated token of output.
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	if len(lines) == 0 {
+	combined := append(append([]byte{}, out...), '\n')
+	combined = append(combined, errOut...)
+	return parseCreateOutput(combined)
+}
+
+func parseCreateOutput(out []byte) (string, error) {
+	fields := strings.Fields(string(out))
+	for i := len(fields) - 1; i >= 0; i-- {
+		field := strings.Trim(fields[i], "()[]<>,.")
+		isURL := strings.HasPrefix(field, "http://") || strings.HasPrefix(field, "https://")
+		if isURL && strings.Contains(field, "/pull/") {
+			return field, nil
+		}
+	}
+	if strings.TrimSpace(string(out)) == "" {
 		return "", fmt.Errorf("gh pr create: unexpected empty output")
 	}
-	last := lines[len(lines)-1]
-	fields := strings.Fields(last)
-	if len(fields) == 0 {
-		return "", fmt.Errorf("gh pr create: could not parse PR URL from output")
-	}
-	return fields[len(fields)-1], nil
+	return "", fmt.Errorf("gh pr create: could not parse PR URL from output")
 }
 
 // Ready marks a PR as ready for review.

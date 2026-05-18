@@ -128,7 +128,3 @@ style = bottom-only
 ```
 
 Setting `land.style = disable` removes the `land` subcommand entirely.
-
-## License
-
-Apache-2.0 with LLVM Exceptions. See [`LICENSE`](LICENSE).
