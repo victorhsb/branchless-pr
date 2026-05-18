@@ -74,6 +74,7 @@ stack-pr abandon
 - `stack-pr abandon` — strip stack metadata and delete generated branches.
 - `stack-pr config <section>.<key>=<value>` — write a setting to `.stack-pr.cfg`.
 - `stack-pr agent prompt [topic]` — emit static, versioned guidance for LLM agents.
+- `stack-pr agent diagnose [--format text|json] [--online]` — emit a read-only, best-effort diagnostic report for agents.
 
 ## Shared options
 
@@ -124,6 +125,42 @@ stack-pr agent prompt submit --format json
 Use `--format text` for markdown (default) or `--format json` for a structured
 agent-consumable envelope with versioned `id` values and command side-effect
 metadata.
+
+## Agent diagnose
+
+`stack-pr agent diagnose` inspects repository, stack, and PR metadata state and
+prints a read-only diagnostic report. It is best-effort: reportable conditions
+such as a dirty working tree, missing PR metadata, a rebase in progress, or even
+being outside a Git repository are represented in the payload instead of causing
+the command to fail. The command exits `0` for those reportable outcomes; check
+the top-level `status` and individual check entries for severity.
+
+```bash
+stack-pr agent diagnose
+stack-pr agent diagnose --format json
+stack-pr agent diagnose --online
+```
+
+Flags:
+
+- `--format text|json`: output Markdown text (default) or a single JSON document.
+- `--online`: allow optional GitHub checks via `gh`, such as live PR state.
+  Without this flag, diagnose performs no `gh` command invocations and does not
+  contact GitHub.
+
+The initial JSON schema version is `"1"`. The JSON envelope contains:
+
+- `schema_version`: currently `"1"`.
+- `status`: one of `ok`, `warning`, `blocking`, or `unknown`.
+- `repo`: repository context (`root`, `current_branch`, `remote`, `target`,
+  `base`, `head`, `branch_name_template`, `online`).
+- `stack`: stack summary (`size`, `entries_with_pr`, `entries_missing_pr`).
+- `checks`: check entries with `id`, `status`, and `message`; blocking entries
+  also include `blocks` and `suggested_fix`.
+- `recommendation`: a safe next action with `command`, `reason`,
+  `side_effects`, `requires_confirmation`, and optional
+  `potential_next_actions`. `stack-pr land` is never the primary
+  recommendation; if surfaced, it requires explicit confirmation.
 
 ## Configuration
 

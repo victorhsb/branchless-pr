@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 - 2026-05-18
+
+- Added `stack-pr agent diagnose`, a read-only, best-effort diagnostic command
+  for agents and humans, with Markdown/JSON output, offline-by-default checks,
+  and safe next-action recommendations.
+
 ## v1.2.0 - 2026-05-17
 
 - Added `stack-pr agent prompt`, a side-effect-free command that emits static,

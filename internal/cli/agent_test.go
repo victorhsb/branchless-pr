@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -137,6 +138,86 @@ func TestAgentPromptRejectsUnknownFormat(t *testing.T) {
 	}
 }
 
+func TestAgentDiagnoseFlagParsing(t *testing.T) {
+	out, err := executeRootForTest([]string{"agent", "diagnose", "--format", "json", "--online"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SchemaVersion string `json:"schema_version"`
+		Repo          struct {
+			Online bool `json:"online"`
+		} `json:"repo"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("invalid diagnose json: %v\n%s", err, out)
+	}
+	if payload.SchemaVersion != "1" || !payload.Repo.Online {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestAgentDiagnoseRejectsUnknownFormat(t *testing.T) {
+	_, err := executeRootForTest([]string{"agent", "diagnose", "--format", "yaml"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), `unknown agent diagnose format "yaml"`) {
+		t.Fatalf("unclear error: %v", err)
+	}
+}
+
+func TestAgentDiagnoseExitZeroForReportableOutcomes(t *testing.T) {
+	if _, err := executeRootForTest([]string{"agent", "diagnose", "--format", "json"}); err != nil {
+		t.Fatalf("clean/current repository diagnose returned error: %v", err)
+	}
+
+	blockingRepo := t.TempDir()
+	if err := runGitForTest(blockingRepo, "init"); err != nil {
+		t.Fatal(err)
+	}
+	chdirForTest(t, blockingRepo)
+	if _, err := executeRootForTest([]string{"agent", "diagnose", "--format", "json"}); err != nil {
+		t.Fatalf("blocking repository diagnose returned error: %v", err)
+	}
+}
+
+func TestAgentDiagnoseRunsOutsideGitRepository(t *testing.T) {
+	chdirForTest(t, t.TempDir())
+	out, err := executeRootForTest([]string{"agent", "diagnose", "--format", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Checks []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("invalid diagnose json: %v", err)
+	}
+	found := false
+	for _, c := range payload.Checks {
+		if c.ID == "git_repository" && c.Status == "blocking" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing blocking git_repository check: %s", out)
+	}
+}
+
+func TestAgentDiagnoseTextMentionsReadOnlyRecommendation(t *testing.T) {
+	out, err := executeRootForTest([]string{"agent", "diagnose"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "# stack-pr agent diagnose") || !strings.Contains(out, "## Recommendation") {
+		t.Fatalf("missing diagnose text sections:\n%s", out)
+	}
+}
+
 func TestAgentPromptRunsOutsideGitRepository(t *testing.T) {
 	chdirForTest(t, t.TempDir())
 	out, err := executeRootForTest([]string{"agent", "prompt", "overview"})
@@ -169,6 +250,12 @@ func executeRootForTest(args []string) (string, error) {
 	cmd.SetErr(&bytes.Buffer{})
 	err = cmd.Execute()
 	return out.String(), err
+}
+
+func runGitForTest(dir string, args ...string) error {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	return cmd.Run()
 }
 
 func chdirForTest(t *testing.T, dir string) {
