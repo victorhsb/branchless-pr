@@ -4,6 +4,10 @@
 
 A stack is the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`); every higher PR targets the generated branch for the previous commit. This way each PR review shows only one logical commit while still preserving dependency order.
 
+> **Alias:** `bpr` ("branchless PR") is a shorter alias for `stack-pr`. It
+> ships as an identical binary with the same commands, flags, and config file.
+> See the [Install](#install) section below for setup options.
+
 ## Install
 
 ### Homebrew (macOS/Linux)
@@ -28,14 +32,41 @@ Download from [Releases](https://github.com/victorhsb/branchless-pr/releases). E
 
 ```bash
 go install github.com/victorhsb/branchless-pr/cmd/stack-pr@latest
+# shorter alias binary
+alias bpr='stack-pr'
 ```
+
+> Installing the binary via `go install` only provides `stack-pr`. For a
+> standalone `bpr` binary, use `make install-bpr` (see [Build from
+> source](#build-from-source)) or add a shell alias.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/victorhsb/branchless-pr
 cd branchless-pr
-go build -o stack-pr ./cmd/stack-pr
+make build        # produces both stack-pr and bpr binaries
+```
+
+The `make build` target now produces two binaries:
+
+- `stack-pr` — the main CLI entrypoint
+- `bpr` — the shorter alias binary (`bpr --help` works identically)
+
+> **Homebrew & Docker:** when installing via Homebrew or Docker, `bpr` is
+> already included. No extra setup is needed.
+
+#### Shell aliases (optional)
+
+If you only installed the `stack-pr` binary, you can also get `bpr` via a
+shell alias:
+
+```bash
+# Bash / Zsh — add to ~/.bashrc or ~/.zshrc
+alias bpr='stack-pr'
+
+# Fish
+alias bpr 'stack-pr'
 ```
 
 ## Requirements

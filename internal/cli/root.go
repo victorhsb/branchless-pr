@@ -29,20 +29,22 @@ var (
 
 var ctxKey struct{}
 
-// Execute is the entrypoint called from main.go.
-func Execute() error {
+// Execute is the entrypoint called from main.go.  progName is the command
+// name shown in CLI help, error messages, and completions (e.g. "stack-pr"
+// or "bpr").
+func Execute(progName string) error {
 	args := []string{"--help"}
 	if len(os.Args) > 1 {
 		args = os.Args[1:]
 	}
-	root, err := newRootCommand(args)
+	root, err := newRootCommand(progName, args)
 	if err != nil {
 		return err
 	}
 	return root.Execute()
 }
 
-func newRootCommand(args []string) (*cobra.Command, error) {
+func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 	cobra.EnableCommandSorting = false
 
 	defaults := config.Defaults()
@@ -62,7 +64,7 @@ func newRootCommand(args []string) (*cobra.Command, error) {
 	}
 
 	root := &cobra.Command{
-		Use:           "stack-pr",
+		Use:           progName,
 		Short:         "Create, update, view, abandon, and land stacked GitHub pull requests.",
 		Version:       Version(),
 		SilenceUsage:  true,

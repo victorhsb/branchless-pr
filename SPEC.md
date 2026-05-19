@@ -4,7 +4,7 @@ This document specifies the current `stack-pr` repository in enough detail to re
 
 ## 1. Purpose
 
-`stack-pr` is a Python command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests.
+`stack-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests.
 
 A stack is modeled as the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`), and every higher PR targets the generated branch for the previous commit. This makes each PR review show only one logical commit while still preserving dependency order.
 
@@ -14,7 +14,11 @@ The installed console command is:
 stack-pr
 ```
 
-It also supports module execution through:
+A shorter alias, `bpr` ("branchless PR"), is available as an identical binary
+or via a shell alias. It accepts the exact same commands, flags, and config
+file as `stack-pr`.
+
+In the Python port, module execution is also supported:
 
 ```bash
 python -m stack_pr

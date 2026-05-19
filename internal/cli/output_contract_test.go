@@ -33,7 +33,7 @@ func TestPrimaryCommandsDoNotPrintBannersOrSuccessMarkers(t *testing.T) {
 }
 
 func TestRootCommandSilencesCobraErrorPreambles(t *testing.T) {
-	cmd, err := newRootCommand([]string{"view"})
+	cmd, err := newRootCommand("stack-pr", []string{"view"})
 	if err != nil {
 		t.Fatalf("newRootCommand: %v", err)
 	}

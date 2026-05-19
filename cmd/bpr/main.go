@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	if err := cli.Execute("stack-pr"); err != nil {
+	if err := cli.Execute("bpr"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

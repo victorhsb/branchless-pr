@@ -8,3 +8,4 @@ vendor/
 .vscode/
 .stack-pr.cfg
 /stack-pr
+/bpr

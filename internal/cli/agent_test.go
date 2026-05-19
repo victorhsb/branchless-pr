@@ -12,7 +12,7 @@ import (
 )
 
 func TestUserFacingCommandsHaveAgentRegistryEntries(t *testing.T) {
-	cmd, err := newRootCommand([]string{"agent", "prompt"})
+	cmd, err := newRootCommand("stack-pr", []string{"agent", "prompt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestAgentPromptRunsWithoutGHOnPath(t *testing.T) {
 }
 
 func executeRootForTest(args []string) (string, error) {
-	cmd, err := newRootCommand(args)
+	cmd, err := newRootCommand("stack-pr", args)
 	if err != nil {
 		return "", err
 	}
