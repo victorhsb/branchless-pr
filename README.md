@@ -175,9 +175,11 @@ stack-pr agent diagnose --online
 Flags:
 
 - `--format text|json`: output Markdown text (default) or a single JSON document.
-- `--online`: allow optional GitHub checks via `gh`, such as live PR state.
-  Without this flag, diagnose performs no `gh` command invocations and does not
-  contact GitHub.
+- `--online`: allow optional GitHub checks via `gh`, including GitHub
+  availability and live PR state. Without this flag, diagnose performs no `gh`
+  command invocations and does not contact GitHub. If GitHub appears
+  unavailable, diagnose marks that as blocking for mutating stack operations
+  such as `submit`, `land`, and `abandon`.
 
 The initial JSON schema version is `"1"`. The JSON envelope contains:
 
