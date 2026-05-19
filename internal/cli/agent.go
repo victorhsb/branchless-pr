@@ -68,7 +68,7 @@ func agentDiagnoseCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&format, "format", "text", `Output format: "text" or "json"`)
-	cmd.Flags().BoolVar(&online, "online", false, "Allow optional GitHub network checks for availability and live PR state")
+	cmd.Flags().BoolVar(&online, "online", false, "Allow optional GitHub network checks for live PR state")
 	return cmd
 }
 

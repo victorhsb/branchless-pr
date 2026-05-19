@@ -53,7 +53,6 @@ func Run(opts Options) Report {
 	i.add("git_repository", i.checkGitRepository)
 	i.add("gh_installed", i.checkGHInstalled)
 	i.add("github_authentication", i.checkGitHubAuth)
-	i.add("github_availability", i.checkGitHubAvailability)
 	i.add("working_tree_clean", i.checkWorkingTreeClean)
 	i.add("rebase_in_progress", i.checkRebaseInProgress)
 	i.add("base_head_resolution", i.checkBaseHeadResolution)
@@ -128,34 +127,6 @@ func (i *inspector) checkGitHubAuth() (CheckEntry, error) {
 		return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("gh authentication check failed: %v", err)}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: "gh authentication appears available"}, nil
-}
-
-func (i *inspector) checkGitHubAvailability() (CheckEntry, error) {
-	if !i.opts.Online {
-		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability was not checked because --online was not specified"}, nil
-	}
-	if _, err := i.run.LookPath("gh"); err != nil {
-		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability cannot be checked because gh is not installed"}, nil
-	}
-
-	out, stderr, err := i.run.Run([]string{"gh", "api", "/rate_limit"}, shell.RunOpts{Dir: i.opts.WorkDir, Quiet: true, Check: false})
-	if err == nil {
-		return CheckEntry{Status: StatusOK, Message: "GitHub appears reachable via gh"}, nil
-	}
-
-	detail := strings.TrimSpace(strings.Join([]string{string(out), string(stderr), err.Error()}, " "))
-	if isGitHubAuthFailure(detail) {
-		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability was not classified as an outage because gh reported an authentication or authorization failure"}, nil
-	}
-	if isLikelyGitHubOutage(detail) {
-		return CheckEntry{
-			Status:       StatusBlocking,
-			Message:      fmt.Sprintf("GitHub appears unavailable via gh: %s", detail),
-			Blocks:       []string{"submit", "land", "abandon"},
-			SuggestedFix: "Wait for GitHub availability to recover, then rerun stack-pr agent diagnose --online before mutating stack state.",
-		}, nil
-	}
-	return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("GitHub availability could not be determined via gh: %s", detail)}, nil
 }
 
 func (i *inspector) checkWorkingTreeClean() (CheckEntry, error) {
@@ -332,9 +303,6 @@ func (i *inspector) checkOnlinePRState() (CheckEntry, error) {
 	if !i.opts.Online {
 		return CheckEntry{Status: StatusUnknown, Message: "online PR state was not checked because --online was not specified"}, nil
 	}
-	if c, ok := findCheck(i.report.Checks, "github_availability"); ok && c.Status == StatusBlocking {
-		return CheckEntry{Status: StatusUnknown, Message: "live PR state was not trusted because GitHub appears unavailable"}, nil
-	}
 	if len(i.st) == 0 {
 		return CheckEntry{Status: StatusUnknown, Message: "online PR state cannot be checked before stack metadata is available"}, nil
 	}
@@ -371,62 +339,6 @@ func (i *inspector) checkOnlinePRState() (CheckEntry, error) {
 		return CheckEntry{Status: StatusUnknown, Message: "no PR metadata is available for online PR state checks"}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: fmt.Sprintf("queried live state for %d PR(s)", checked)}, nil
-}
-
-func isLikelyGitHubOutage(detail string) bool {
-	detail = strings.ToLower(detail)
-	needles := []string{
-		"500",
-		"502",
-		"503",
-		"504",
-		"bad gateway",
-		"connection refused",
-		"connection reset",
-		"connection timed out",
-		"context deadline exceeded",
-		"could not resolve host",
-		"gateway timeout",
-		"i/o timeout",
-		"internal server error",
-		"network is unreachable",
-		"no such host",
-		"service unavailable",
-		"temporarily unavailable",
-		"temporary failure in name resolution",
-		"timed out",
-		"timeout",
-		"tls handshake timeout",
-	}
-	for _, needle := range needles {
-		if strings.Contains(detail, needle) {
-			return true
-		}
-	}
-	return false
-}
-
-func isGitHubAuthFailure(detail string) bool {
-	detail = strings.ToLower(detail)
-	needles := []string{
-		"401",
-		"403",
-		"authentication",
-		"authorization",
-		"forbidden",
-		"gh auth login",
-		"not logged in",
-		"oauth",
-		"permission denied",
-		"requires authentication",
-		"unauthorized",
-	}
-	for _, needle := range needles {
-		if strings.Contains(detail, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 func (i *inspector) inGitRepo() bool {
