@@ -35,6 +35,14 @@ func BuildRecommendation(r Report) Recommendation {
 			RequiresConfirmation: true,
 		}
 	}
+	if c, ok := findCheck(r.Checks, "github_availability"); ok && c.Status == StatusBlocking {
+		return Recommendation{
+			Command:              "wait for GitHub availability or inspect local state only",
+			Reason:               "GitHub appears unavailable, so live GitHub state cannot currently be trusted for mutating stack-pr operations.",
+			SideEffects:          false,
+			RequiresConfirmation: false,
+		}
+	}
 	if r.Stack.EntriesMissingPR > 0 {
 		return recommendationFromCommand("submit --dry-run", "One or more commits are missing PR metadata; dry-run previews the create-or-update plan without mutating local Git or GitHub.")
 	}
