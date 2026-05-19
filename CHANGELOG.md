@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.4.0 – 2026-05-19
+
+- Added `bpr`, a shorter alias entry point for `stack-pr` with `bpr submit`,
+  `bpr view`, etc. (`cmd/bpr/main.go`).
+
 ## v1.3.2 – 2026-05-18
 
 - Fixed `git rev-list --header` parsing to split commits on NUL bytes (`0x00`) instead of
