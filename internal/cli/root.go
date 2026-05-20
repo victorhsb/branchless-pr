@@ -173,7 +173,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			}
 
 			// Require clean repo (all except read-only inspection/config commands)
-			if cmd.Name() != "view" && cmd.Name() != "comments" && cmd.Name() != "config" {
+			if cmd.Name() != "view" && cmd.Name() != "comments" && cmd.Name() != "checks" && cmd.Name() != "config" {
 				if err := RequireCleanRepo(); err != nil {
 					return err
 				}
@@ -219,6 +219,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 	root.AddCommand(submitCmd()) // submit has alias "export"
 	root.AddCommand(viewCmd())
 	root.AddCommand(commentsCmd())
+	root.AddCommand(checksCmd())
 
 	// Land is only registered when land.style != disable (SPEC §6.2)
 	landStyle := cfg.Get("land", "style")

@@ -90,6 +90,9 @@ stack-pr view
 # collect review comments across the stack
 stack-pr comments
 
+# inspect CI checks and brief review-attention state across the stack
+stack-pr checks
+
 # submit / update the stack of PRs
 stack-pr submit
 
@@ -105,6 +108,7 @@ stack-pr abandon
 - `stack-pr submit` (alias: `export`) — create or update PRs for each commit.
 - `stack-pr view` — inspect the stack without modifying anything.
 - `stack-pr comments` — collect PR comments, reviews, and review threads across the stack.
+- `stack-pr checks` — report all CI checks and brief review-attention state across the stack.
 - `stack-pr land` — squash-merge the bottom PR and rebase the rest.
 - `stack-pr abandon` — strip stack metadata and delete generated branches.
 - `stack-pr config <section>.<key>=<value>` — write a setting to `.stack-pr.cfg`.
@@ -166,6 +170,35 @@ Flags:
 - `--kind`: comma-separated kinds: `conversation`, `review`,
   `review_comment`, `review_thread`.
 - `--author`: include feedback authored by the given GitHub login.
+
+## Stack checks
+
+`stack-pr checks` prints a read-only report of GitHub check state across the
+current stack. It reports all checks by default, not only required checks, and
+includes stable failed-check IDs so humans and agents can identify what to fix.
+It also includes brief comment/review counts and bounded snippets; use
+`stack-pr comments` for full comment inspection.
+
+```bash
+stack-pr checks
+stack-pr checks --failed-only
+stack-pr checks --required-only
+stack-pr checks --pr 123 --format json
+stack-pr checks --commit abc123
+```
+
+Flags:
+
+- `--format text|json`: output Markdown-compatible text (default) or a single
+  JSON object for agents.
+- `--failed-only`: include only failed checks and the stack context needed to
+  understand them.
+- `--required-only`: include only checks known to be required. Checks whose
+  required state is unknown are excluded by this filter.
+- `--pr`: include only the stack entry associated with the given pull request
+  number.
+- `--commit`: include only the stack entry matching a full or unambiguous
+  abbreviated commit SHA.
 
 ## Agent prompt
 

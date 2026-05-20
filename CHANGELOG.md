@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.6.0 – 2026-05-20
+
+- Added `stack-pr checks`, a read-only stack-wide report for GitHub check
+  state across pull requests, including all checks by default, stable failed
+  check IDs for agents, text/JSON output, filters for failed/required checks,
+  pull request or commit scoping, and brief review-attention summaries.
+
 ## v1.5.0 – 2026-05-20
 
 - Added `stack-pr comments`, a read-only stack-wide report for pull request

@@ -4,7 +4,7 @@ This document specifies the current `stack-pr` repository in enough detail to re
 
 ## 1. Purpose
 
-`stack-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests.
+`stack-pr` is a command-line tool for creating, updating, viewing, checking, abandoning, and landing stacked GitHub pull requests.
 
 A stack is modeled as the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`), and every higher PR targets the generated branch for the previous commit. This makes each PR review show only one logical commit while still preserving dependency order.
 
@@ -193,7 +193,7 @@ commit C: head alice/stack/3, base alice/stack/2
 
 ### 6.1 Common options
 
-These options are shared by `submit`, `export`, `view`, `comments`, `land`, and `abandon`:
+These options are shared by `submit`, `export`, `view`, `comments`, `checks`, `land`, and `abandon`:
 
 ```text
 -R, --remote                Remote name; default from config repo.remote or origin
@@ -246,6 +246,20 @@ Options:
 --unresolved-only        Show only unresolved or attention-required feedback
 --kind                   Comma-separated kinds: conversation, review, review_comment, review_thread
 --author                 Show only feedback authored by the given GitHub login
+```
+
+#### `stack-pr checks`
+
+Reports all GitHub checks and brief review-attention state across the current stack. It is read-only: it does not modify commits, branches, remotes, pull requests, checks, reviews, or comments. Full comment inspection remains the responsibility of `stack-pr comments`.
+
+Options:
+
+```text
+--format text|json       Output Markdown-compatible text or machine-readable JSON; default text
+--failed-only            Show only failed checks with enough stack context to identify what failed
+--required-only          Show only checks known to be required
+--pr                     Show only the stack entry associated with this pull request number
+--commit                 Show only the stack entry matching this full or unambiguous abbreviated SHA
 ```
 
 #### `stack-pr land`
@@ -655,9 +669,42 @@ Normalized comment kinds:
 - `review_comment`: line-level review comments when exposed separately or as thread replies.
 - `review_thread`: review thread containers with resolution state when GitHub provides it.
 
-## 19. Cleanliness and safety rules
+## 19. Checks algorithm
 
-- All commands except `view` and `comments` require no tracked/staged/unstaged changes.
+`command_checks(args)` implements stack-wide CI and lightweight review-attention inspection.
+
+Detailed behavior:
+
+1. Load the stack using the same base/head range as `view`.
+2. If empty, print an empty checks report and do not query GitHub for checks.
+3. Read `stack-info` metadata for each entry.
+4. Assign head branches to entries missing metadata heads by scanning remote refs, but do not create branches or push.
+5. Set base branches.
+6. Apply `--pr` and `--commit` filters after stack discovery and before GitHub reads.
+7. For every entry with PR metadata, fetch read-only check data through `gh pr view <pr> --json number,url,headRefName,baseRefName,headRefOid,statusCheckRollup,comments,reviews`.
+8. For every entry without PR metadata, include a report entry with status `missing`.
+9. If an individual PR cannot be read, include a report entry with status `failed` and continue with other PRs.
+10. If GitHub authentication or authorization fails globally, exit non-zero with a clear error.
+11. Include all reported checks by default, including optional checks and checks whose required state is unknown.
+12. Apply `--required-only` by retaining only checks known to be required.
+13. Apply `--failed-only` by retaining failed checks and the stack context needed to identify those failures.
+14. Build a top-level failed-check summary in deterministic stack order.
+15. Include lightweight comment and review-attention counts and bounded snippets when available, with guidance to use `stack-pr comments` for full comment inspection.
+16. Render Markdown-compatible text by default, grouped by stack entry in stack order.
+17. With `--format json`, render one JSON object containing `schema_version`, `command`, `repository`, `range`, `stack`, `pull_requests`, and `failed_checks`, with no ANSI escape sequences, terminal hyperlinks, progress logs, or extra stdout text.
+
+Normalized check fields:
+
+- `id`: deterministic semantic ID derived from provider, workflow or suite, and check name.
+- `provider`: check source such as `github_actions`, `github_status`, `github_check`, or `unknown`.
+- `provider_id`, `run_id`, `check_run_id`, `workflow`: exact provider identifiers when GitHub exposes them.
+- `name`, `status`, `conclusion`, `required`, `url`, `started_at`, and `completed_at`.
+
+The `required` value is `true`, `false`, or `unknown`; implementations must not infer required state from check names.
+
+## 20. Cleanliness and safety rules
+
+- All commands except `view`, `comments`, and `checks` require no tracked/staged/unstaged changes.
 - Untracked files (`??`) are ignored for cleanliness checks.
 - `submit/export --stash` can stash changes before the clean check and pop them afterward.
 - Submit refuses to run while `.git/rebase-merge` or `.git/rebase-apply` exists.
@@ -665,7 +712,7 @@ Normalized comment kinds:
 - Subprocess stdout/stderr are captured in quiet mode, which allows failures to print exit code/stdout/stderr.
 - Shell invocation is disallowed in the subprocess wrapper.
 
-## 20. Output formatting
+## 21. Output formatting
 
 ANSI color helpers:
 
@@ -692,12 +739,14 @@ Commands do not print command banners such as `SUBMIT`, `VIEW`, `LAND`, or `ABAN
 
 Comments text output is Markdown-compatible. It starts with `# stack-pr comments`, prints the inspected range, then groups results by stack entry and PR. Empty stacks, entries without PR metadata, empty filtered results, and per-PR read failures are rendered explicitly. JSON comments output is a single parseable object and does not include ANSI styling or terminal hyperlinks.
 
+Checks text output is Markdown-compatible. It starts with `# stack-pr checks`, prints the inspected range, surfaces failed checks with semantic IDs, then groups results by stack entry and PR. Empty stacks, entries without PR metadata, empty check results, per-PR read failures, and lightweight comment summaries are rendered explicitly. JSON checks output is a single parseable object and does not include ANSI styling or terminal hyperlinks.
+
 Verbosity:
 
 - `log(..., level=1)` always prints.
 - `log(..., level>=2)` prints only when global verbose is enabled.
 
-## 21. Error behavior
+## 22. Error behavior
 
 The CLI contains explicit multi-line error messages for these scenarios:
 
@@ -717,10 +766,12 @@ The CLI contains explicit multi-line error messages for these scenarios:
 - Target `main` missing while `master` exists.
 - Unsupported comments output format or comment kind.
 - GitHub authentication/authorization failure while reading stack comments.
+- Unsupported checks output format or unmatched checks filter.
+- GitHub authentication/authorization failure while reading stack checks.
 
 Errors are printed with a red `ERROR:` prefix. Many validation failures raise `RuntimeError`; target branch/config/rebase-progress failures use `sys.exit(1)` or return paths as implemented.
 
-## 22. Tests
+## 23. Tests
 
 The repository currently has 14 tests, all passing.
 
@@ -757,7 +808,7 @@ Covers `run_shell_command` behavior:
 - `quiet=True` captures stdout/stderr on `CalledProcessError`.
 - `quiet=False` prints stdout/stderr on failure.
 
-## 23. Linting, formatting, and type checking configuration
+## 24. Linting, formatting, and type checking configuration
 
 ### 23.1 Ruff
 
@@ -802,7 +853,7 @@ Mypy strictness:
 - Warn redundant casts, unused ignores, no return, unreachable.
 - Strict optional enabled.
 
-## 24. GitHub Actions
+## 25. GitHub Actions
 
 ### 24.1 Test workflow
 
@@ -846,7 +897,7 @@ File: `.github/workflows/release.yml`
   4. Build with `pdm build`.
   5. Publish with pinned `pypa/gh-action-pypi-publish` release/v1 SHA.
 
-## 25. Documentation files
+## 26. Documentation files
 
 ### 25.1 README
 
@@ -878,7 +929,7 @@ Brief contribution guide covering issue filing, pull requests, maintainer review
 
 Apache License v2.0 with LLVM Exceptions.
 
-## 26. Ignore and attributes files
+## 27. Ignore and attributes files
 
 `.gitignore` ignores common Python build artifacts, caches, virtual environments, coverage outputs, PDM/Pixi local state, `.stack-pr.cfg`, `.vscode`, and `.DS_Store`. `pdm.lock` is intentionally not ignored, despite a commented note.
 
@@ -888,7 +939,7 @@ Apache License v2.0 with LLVM Exceptions.
 pixi.lock linguist-language=YAML linguist-generated=true
 ```
 
-## 27. Reproduction checklist
+## 28. Reproduction checklist
 
 To reproduce the project:
 

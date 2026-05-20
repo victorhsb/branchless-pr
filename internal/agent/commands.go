@@ -49,6 +49,20 @@ var Commands = map[string]AgentCommandSpec{
 			"Treat comment output as approval to resolve, edit, merge, or delete anything.",
 		},
 	},
+	"checks": {
+		Name:        "stack-pr checks",
+		Purpose:     "Report CI and review-attention state across the stack without changing commits or PRs.",
+		SideEffects: false,
+		SafeBefore: []string{
+			"Inspecting failed CI checks across every PR in the stack.",
+			"Planning code changes from stable failed-check IDs.",
+			"Checking lightweight review/comment pressure before full comment inspection.",
+		},
+		Never: []string{
+			"Treat check output as approval to rerun, resolve, merge, or delete anything.",
+			"Use checks as a replacement for stack-pr comments when full comment details are needed.",
+		},
+	},
 	"submit --dry-run": {
 		Name:        "stack-pr submit --dry-run",
 		Purpose:     "Preview the PR create/update plan without local Git mutations, pushes, or GitHub writes.",
