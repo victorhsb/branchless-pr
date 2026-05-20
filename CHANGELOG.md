@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.0 – 2026-05-20
+
+- Added `stack-pr comments`, a read-only stack-wide report for pull request
+  conversation comments, reviews, review comments, and review threads, with
+  Markdown text output, JSON output, and filters for unresolved feedback,
+  comment kind, and author.
+
 ## v1.4.0 – 2026-05-19
 
 - Added `bpr`, a shorter alias entry point for `stack-pr` with `bpr submit`,
