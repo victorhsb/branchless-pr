@@ -193,7 +193,7 @@ commit C: head alice/stack/3, base alice/stack/2
 
 ### 6.1 Common options
 
-These options are shared by `submit`, `export`, `view`, `land`, and `abandon`:
+These options are shared by `submit`, `export`, `view`, `comments`, `land`, and `abandon`:
 
 ```text
 -R, --remote                Remote name; default from config repo.remote or origin
@@ -234,6 +234,19 @@ Draft bitmask semantics:
 #### `stack-pr view`
 
 Safely inspects the current stack. It does not modify commits or push branches, but it may fetch/prune the remote while assigning hypothetical head branches for display.
+
+#### `stack-pr comments`
+
+Collects pull request conversation comments, reviews, review comments, and review threads across the current stack. It is read-only: it does not modify commits, branches, remotes, pull requests, or comments.
+
+Options:
+
+```text
+--format text|json       Output Markdown-compatible text or machine-readable JSON; default text
+--unresolved-only        Show only unresolved or attention-required feedback
+--kind                   Comma-separated kinds: conversation, review, review_comment, review_thread
+--author                 Show only feedback authored by the given GitHub login
+```
 
 #### `stack-pr land`
 
@@ -614,9 +627,37 @@ Detailed behavior:
    - If every entry has PR/head/base metadata, say stack is ready to land and show update/land commands.
    - Otherwise say stack cannot be landed yet and show export command.
 
-## 18. Cleanliness and safety rules
+## 18. Comments algorithm
 
-- All commands except `view` require no tracked/staged/unstaged changes.
+`command_comments(args)` implements stack-wide review feedback inspection.
+
+Detailed behavior:
+
+1. Load the stack using the same base/head range as `view`.
+2. If empty, print an empty comments report and do not query GitHub for comments.
+3. Read `stack-info` metadata for each entry.
+4. Assign head branches to entries missing metadata heads by scanning remote refs, but do not create branches or push.
+5. Set base branches.
+6. For every entry with PR metadata, fetch read-only comment data through `gh`:
+   - `gh pr view <pr> --json number,url,comments,reviews` for conversation comments and reviews.
+   - `gh api graphql` for review threads and thread resolution state.
+7. For every entry without PR metadata, include a report entry with status `missing`.
+8. If an individual PR cannot be read, include a report entry with status `failed` and continue with other PRs.
+9. If GitHub authentication or authorization fails globally, exit non-zero with a clear error.
+10. Apply filters in this order: comment kind, unresolved-only, author.
+11. Render Markdown-compatible text by default, grouped by stack entry in stack order.
+12. With `--format json`, render one JSON object containing `schema_version`, `command`, `repository`, `range`, `stack`, and `pull_requests`, with no ANSI escape sequences, terminal hyperlinks, progress logs, or extra stdout text.
+
+Normalized comment kinds:
+
+- `conversation`: issue-style pull request conversation comments.
+- `review`: submitted pull request reviews.
+- `review_comment`: line-level review comments when exposed separately or as thread replies.
+- `review_thread`: review thread containers with resolution state when GitHub provides it.
+
+## 19. Cleanliness and safety rules
+
+- All commands except `view` and `comments` require no tracked/staged/unstaged changes.
 - Untracked files (`??`) are ignored for cleanliness checks.
 - `submit/export --stash` can stash changes before the clean check and pop them afterward.
 - Submit refuses to run while `.git/rebase-merge` or `.git/rebase-apply` exists.
@@ -624,7 +665,7 @@ Detailed behavior:
 - Subprocess stdout/stderr are captured in quiet mode, which allows failures to print exit code/stdout/stderr.
 - Shell invocation is disallowed in the subprocess wrapper.
 
-## 19. Output formatting
+## 20. Output formatting
 
 ANSI color helpers:
 
@@ -649,12 +690,14 @@ Stack lines include:
 
 Commands do not print command banners such as `SUBMIT`, `VIEW`, `LAND`, or `ABANDON`, and do not print generic success/failure markers such as `SUCCESS!`; output is limited to command results, warnings, tips, and errors. Runtime command errors are printed without Cobra's extra `Error:` or usage preambles.
 
+Comments text output is Markdown-compatible. It starts with `# stack-pr comments`, prints the inspected range, then groups results by stack entry and PR. Empty stacks, entries without PR metadata, empty filtered results, and per-PR read failures are rendered explicitly. JSON comments output is a single parseable object and does not include ANSI styling or terminal hyperlinks.
+
 Verbosity:
 
 - `log(..., level=1)` always prints.
 - `log(..., level>=2)` prints only when global verbose is enabled.
 
-## 20. Error behavior
+## 21. Error behavior
 
 The CLI contains explicit multi-line error messages for these scenarios:
 
@@ -672,10 +715,12 @@ The CLI contains explicit multi-line error messages for these scenarios:
 - Invalid config setting format.
 - Target branch missing.
 - Target `main` missing while `master` exists.
+- Unsupported comments output format or comment kind.
+- GitHub authentication/authorization failure while reading stack comments.
 
 Errors are printed with a red `ERROR:` prefix. Many validation failures raise `RuntimeError`; target branch/config/rebase-progress failures use `sys.exit(1)` or return paths as implemented.
 
-## 21. Tests
+## 22. Tests
 
 The repository currently has 14 tests, all passing.
 
@@ -691,7 +736,7 @@ Result:
 14 passed
 ```
 
-### 21.1 `tests/test_misc.py`
+### 22.1 `tests/test_misc.py`
 
 Covers:
 
@@ -703,7 +748,7 @@ Covers:
 - Choosing next available branch name.
 - Rebase-in-progress detection for `.git/rebase-merge` and `.git/rebase-apply`.
 
-### 21.2 `tests/test_shell_commands.py`
+### 22.2 `tests/test_shell_commands.py`
 
 Covers `run_shell_command` behavior:
 
@@ -712,9 +757,9 @@ Covers `run_shell_command` behavior:
 - `quiet=True` captures stdout/stderr on `CalledProcessError`.
 - `quiet=False` prints stdout/stderr on failure.
 
-## 22. Linting, formatting, and type checking configuration
+## 23. Linting, formatting, and type checking configuration
 
-### 22.1 Ruff
+### 23.1 Ruff
 
 Ruff configuration:
 
@@ -734,7 +779,7 @@ Ruff configuration:
 - Quote style: double quotes for docstrings, inline strings, and multiline strings.
 - Tests additionally ignore `S101`, `ARG`, `FBT`, `ANN401`, `T201`, `PLR2004`.
 
-### 22.2 Pytest
+### 23.2 Pytest
 
 Pytest config:
 
@@ -744,7 +789,7 @@ Pytest config:
 - Asyncio mode: `auto`.
 - Asyncio default fixture loop scope: `function`.
 
-### 22.3 Mypy
+### 23.3 Mypy
 
 Mypy strictness:
 
@@ -757,9 +802,9 @@ Mypy strictness:
 - Warn redundant casts, unused ignores, no return, unreachable.
 - Strict optional enabled.
 
-## 23. GitHub Actions
+## 24. GitHub Actions
 
-### 23.1 Test workflow
+### 24.1 Test workflow
 
 File: `.github/workflows/check_tests.yml`
 
@@ -772,7 +817,7 @@ File: `.github/workflows/check_tests.yml`
   3. Upgrade pip and install pytest.
   4. Run `pytest tests/`.
 
-### 23.2 Lint workflow
+### 24.2 Lint workflow
 
 File: `.github/workflows/lint.yml`
 
@@ -784,7 +829,7 @@ File: `.github/workflows/lint.yml`
   2. Run pinned `chartboost/ruff-action` v1.
   3. Run pinned `chartboost/ruff-action` v1 with `args: 'format --check'`.
 
-### 23.3 Release workflow
+### 24.3 Release workflow
 
 File: `.github/workflows/release.yml`
 
@@ -801,9 +846,9 @@ File: `.github/workflows/release.yml`
   4. Build with `pdm build`.
   5. Publish with pinned `pypa/gh-action-pypi-publish` release/v1 SHA.
 
-## 24. Documentation files
+## 25. Documentation files
 
-### 24.1 README
+### 25.1 README
 
 The README explains:
 
@@ -816,7 +861,7 @@ The README explains:
 - Full command-line option reference.
 - Example config file.
 
-### 24.2 CHANGELOG
+### 25.2 CHANGELOG
 
 Current entries:
 
@@ -825,15 +870,15 @@ Current entries:
 - Version 0.1.2: config files, branch name customization, branch deletion bug fix on abandon, suppressed subcommand output.
 - Version 0.1.1 heading only.
 
-### 24.3 CONTRIBUTING
+### 25.3 CONTRIBUTING
 
 Brief contribution guide covering issue filing, pull requests, maintainer review, and maintainer-controlled merges.
 
-### 24.4 LICENSE
+### 25.4 LICENSE
 
 Apache License v2.0 with LLVM Exceptions.
 
-## 25. Ignore and attributes files
+## 26. Ignore and attributes files
 
 `.gitignore` ignores common Python build artifacts, caches, virtual environments, coverage outputs, PDM/Pixi local state, `.stack-pr.cfg`, `.vscode`, and `.DS_Store`. `pdm.lock` is intentionally not ignored, despite a commented note.
 
@@ -843,7 +888,7 @@ Apache License v2.0 with LLVM Exceptions.
 pixi.lock linguist-language=YAML linguist-generated=true
 ```
 
-## 26. Reproduction checklist
+## 27. Reproduction checklist
 
 To reproduce the project:
 

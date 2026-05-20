@@ -64,6 +64,7 @@ var topics = map[string]topicSpec{
 		CommandKeys: CommandKeys,
 		Rules: []string{
 			"Run stack-pr view before recommending a mutating stack operation when state is unknown.",
+			"Use stack-pr comments when the user needs review feedback from every PR in the stack.",
 			"Use stack-pr submit --dry-run to preview publishing changes before stack-pr submit.",
 			"Obtain explicit user confirmation before running any command marked as having side effects.",
 			"Never claim a dry-run created, updated, merged, or deleted anything.",
@@ -137,7 +138,7 @@ var topics = map[string]topicSpec{
 			"When a stack-pr command fails, stop and inspect the error before running another mutating command.",
 			"Prefer read-only inspection and user guidance over automatic cleanup.",
 		},
-		CommandKeys: []string{"view", "submit --dry-run", "submit", "land", "abandon"},
+		CommandKeys: []string{"view", "comments", "submit --dry-run", "submit", "land", "abandon"},
 		Rules: []string{
 			"Do not run a destructive command as recovery unless the user explicitly asks for that recovery action.",
 			"If a rebase is in progress, ask the user whether to continue, abort, or resolve conflicts before submitting again.",

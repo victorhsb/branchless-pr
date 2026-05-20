@@ -87,6 +87,9 @@ git checkout -b my-feature main
 # inspect the stack
 stack-pr view
 
+# collect review comments across the stack
+stack-pr comments
+
 # submit / update the stack of PRs
 stack-pr submit
 
@@ -101,6 +104,7 @@ stack-pr abandon
 
 - `stack-pr submit` (alias: `export`) — create or update PRs for each commit.
 - `stack-pr view` — inspect the stack without modifying anything.
+- `stack-pr comments` — collect PR comments, reviews, and review threads across the stack.
 - `stack-pr land` — squash-merge the bottom PR and rebase the rest.
 - `stack-pr abandon` — strip stack metadata and delete generated branches.
 - `stack-pr config <section>.<key>=<value>` — write a setting to `.stack-pr.cfg`.
@@ -139,6 +143,29 @@ the plan that a real submit would execute — per stack entry: the action
 branch, existing PR URL when present, draft state for new PRs, and whether
 stack metadata would be added to the commit. No local Git mutations, remote
 pushes, or GitHub PR writes are performed.
+
+## Stack comments
+
+`stack-pr comments` prints a read-only report of pull request feedback across
+the current stack. It groups conversation comments, submitted reviews, review
+comments, and review threads by stack entry and PR. The command does not
+checkout branches, amend commits, push, or write to GitHub.
+
+```bash
+stack-pr comments
+stack-pr comments --unresolved-only
+stack-pr comments --kind review_thread --format json
+stack-pr comments --author octocat
+```
+
+Flags:
+
+- `--format text|json`: output Markdown-compatible text (default) or a single
+  JSON object for agents.
+- `--unresolved-only`: include only unresolved or attention-required feedback.
+- `--kind`: comma-separated kinds: `conversation`, `review`,
+  `review_comment`, `review_thread`.
+- `--author`: include feedback authored by the given GitHub login.
 
 ## Agent prompt
 

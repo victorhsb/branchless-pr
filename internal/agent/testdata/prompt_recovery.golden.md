@@ -9,6 +9,7 @@ Prefer read-only inspection and user guidance over automatic cleanup.
 ## Commands
 
 - `stack-pr view` — Inspect the local stack and PR metadata without changing commits or PRs. Side effects: no.
+- `stack-pr comments` — Collect PR review comments across the stack without changing commits or PRs. Side effects: no.
 - `stack-pr submit --dry-run` — Preview the PR create/update plan without local Git mutations, pushes, or GitHub writes. Side effects: no.
 - `stack-pr submit` — Create or update GitHub PRs for each commit in the stack. Side effects: yes. Requires explicit user confirmation.
   Effects:

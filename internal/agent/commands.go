@@ -16,6 +16,7 @@ type AgentCommandSpec struct {
 // CommandKeys is the canonical order for command metadata.
 var CommandKeys = []string{
 	"view",
+	"comments",
 	"submit --dry-run",
 	"submit",
 	"land",
@@ -34,6 +35,18 @@ var Commands = map[string]AgentCommandSpec{
 		},
 		Never: []string{
 			"Treat view output as proof that a mutating operation has already happened.",
+		},
+	},
+	"comments": {
+		Name:        "stack-pr comments",
+		Purpose:     "Collect PR review comments across the stack without changing commits or PRs.",
+		SideEffects: false,
+		SafeBefore: []string{
+			"Summarizing outstanding review feedback.",
+			"Planning code changes based on stack-wide PR comments.",
+		},
+		Never: []string{
+			"Treat comment output as approval to resolve, edit, merge, or delete anything.",
 		},
 	},
 	"submit --dry-run": {
