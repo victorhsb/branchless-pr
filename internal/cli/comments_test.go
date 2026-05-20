@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
@@ -61,6 +62,110 @@ func TestFilterCommentItemsUnresolvedAuthorAndKind(t *testing.T) {
 	got = filterCommentItems(items, commentsOptions{author: "erin"}, map[string]bool{pr.CommentKindReviewThread: true})
 	if len(got) != 1 || len(got[0].Replies) != 1 || got[0].Replies[0].Author != "erin" {
 		t.Fatalf("author-filtered thread = %#v", got)
+	}
+}
+
+func TestResolveCommentIgnoredAuthors(t *testing.T) {
+	emptyConfig, err := config.Load(filepath.Join(t.TempDir(), ".stack-pr.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveCommentIgnoredAuthors(&AppContext{Config: emptyConfig}); len(got) != 0 {
+		t.Fatalf("missing config ignored authors = %#v, want empty", got)
+	}
+
+	cfg := config.Defaults()
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{name: "empty", raw: "", want: nil},
+		{name: "single", raw: "ci-bot", want: []string{"ci-bot"}},
+		{name: "multi", raw: "ci-bot,release-bot", want: []string{"ci-bot", "release-bot"}},
+		{name: "whitespace", raw: " ci-bot, , release-bot ", want: []string{"ci-bot", "release-bot"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg.Set("comments", "ignore_authors", tc.raw)
+			got := resolveCommentIgnoredAuthors(&AppContext{Config: cfg})
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("ignored authors = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFilterCommentItemsIgnoredAuthors(t *testing.T) {
+	resolved := false
+	items := []pr.CommentItem{
+		{Kind: pr.CommentKindConversation, Author: "CI-Bot", Body: "status noise"},
+		{Kind: pr.CommentKindReview, Author: "release-bot", Body: "release note"},
+		{Kind: pr.CommentKindReviewComment, Author: "ci-bot", Body: "line noise"},
+		{Kind: pr.CommentKindConversation, Author: "alice", Body: "human"},
+		{Kind: pr.CommentKindReviewThread, Author: "ci-bot", Body: "thread noise", Resolved: &resolved, Replies: []pr.CommentItem{
+			{Kind: pr.CommentKindReviewComment, Author: "ci-bot", Body: "bot reply"},
+			{Kind: pr.CommentKindReviewComment, Author: "bob", Body: "human reply"},
+		}},
+	}
+	kinds, err := parseCommentKinds("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := filterCommentItems(items, commentsOptions{ignoredAuthors: []string{"ci-bot", "release-bot"}}, kinds)
+	if len(got) != 2 {
+		t.Fatalf("filtered len = %d, want 2: %#v", len(got), got)
+	}
+	if got[0].Author != "alice" {
+		t.Fatalf("first retained author = %q, want alice", got[0].Author)
+	}
+	thread := got[1]
+	if thread.Kind != pr.CommentKindReviewThread {
+		t.Fatalf("second retained kind = %q, want review_thread", thread.Kind)
+	}
+	if thread.Author != "bob" || thread.Body != "human reply" {
+		t.Fatalf("thread metadata = author %q body %q, want bob/human reply", thread.Author, thread.Body)
+	}
+	if len(thread.Replies) != 1 || thread.Replies[0].Author != "bob" {
+		t.Fatalf("thread replies = %#v, want only bob", thread.Replies)
+	}
+}
+
+func TestFilterCommentItemsDropsAllIgnoredReviewThread(t *testing.T) {
+	items := []pr.CommentItem{{
+		Kind:   pr.CommentKindReviewThread,
+		Author: "ci-bot",
+		Body:   "thread noise",
+		Replies: []pr.CommentItem{
+			{Kind: pr.CommentKindReviewComment, Author: "ci-bot", Body: "bot reply"},
+			{Kind: pr.CommentKindReviewComment, Author: "release-bot", Body: "release reply"},
+		},
+	}}
+	kinds, err := parseCommentKinds("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := filterCommentItems(items, commentsOptions{ignoredAuthors: []string{"ci-bot", "release-bot"}}, kinds)
+	if len(got) != 0 {
+		t.Fatalf("filtered = %#v, want empty", got)
+	}
+}
+
+func TestFilterCommentItemsAuthorDoesNotIncludeIgnoredAuthor(t *testing.T) {
+	items := []pr.CommentItem{
+		{Kind: pr.CommentKindConversation, Author: "ci-bot", Body: "bot"},
+		{Kind: pr.CommentKindConversation, Author: "alice", Body: "human"},
+	}
+	kinds, err := parseCommentKinds("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := filterCommentItems(items, commentsOptions{author: "ci-bot", ignoredAuthors: []string{"ci-bot"}}, kinds)
+	if len(got) != 0 {
+		t.Fatalf("filtered = %#v, want empty", got)
 	}
 }
 

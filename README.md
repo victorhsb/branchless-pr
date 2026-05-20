@@ -155,6 +155,9 @@ the current stack. It groups conversation comments, submitted reviews, review
 comments, and review threads by stack entry and PR. The command does not
 checkout branches, amend commits, push, or write to GitHub.
 
+Set `comments.ignore_authors` in `.stack-pr.cfg` to hide noisy automation
+accounts from comments output by default.
+
 ```bash
 stack-pr comments
 stack-pr comments --unresolved-only
@@ -270,6 +273,9 @@ remote = origin
 target = main
 reviewer = someuser
 branch_name_template = $USERNAME/stack
+
+[comments]
+ignore_authors = ci-bot,release-bot
 
 [land]
 style = bottom-only

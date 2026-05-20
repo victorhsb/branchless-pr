@@ -175,6 +175,7 @@ func Defaults() *Config {
 	c.Set("repo", "target", "main")
 	c.Set("repo", "reviewer", "")
 	c.Set("repo", "branch_name_template", "$USERNAME/stack")
+	c.Set("comments", "ignore_authors", "")
 	c.Set("land", "style", "bottom-only")
 	return c
 }

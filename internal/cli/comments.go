@@ -17,6 +17,7 @@ type commentsOptions struct {
 	unresolvedOnly bool
 	kinds          string
 	author         string
+	ignoredAuthors []string
 }
 
 type commentsFetcher func(prRef string) (*pr.PullRequestComments, error)
@@ -55,6 +56,7 @@ func runCommentsWithFetcher(app *AppContext, opts commentsOptions, w io.Writer, 
 	if opts.format != "text" && opts.format != "json" {
 		return fmt.Errorf("unknown comments format %q: expected \"text\" or \"json\"", opts.format)
 	}
+	opts.ignoredAuthors = resolveCommentIgnoredAuthors(app)
 
 	report, err := buildCommentsReport(app, opts, kinds, fetch)
 	if err != nil {
@@ -244,10 +246,30 @@ func parseCommentKinds(raw string) (map[string]bool, error) {
 	return selected, nil
 }
 
+func parseCommentAuthorList(raw string) []string {
+	var authors []string
+	for _, part := range strings.Split(raw, ",") {
+		author := strings.TrimSpace(part)
+		if author == "" {
+			continue
+		}
+		authors = append(authors, author)
+	}
+	return authors
+}
+
+func resolveCommentIgnoredAuthors(app *AppContext) []string {
+	if app == nil || app.Config == nil {
+		return nil
+	}
+	return parseCommentAuthorList(app.Config.Get("comments", "ignore_authors"))
+}
+
 func filterCommentItems(items []pr.CommentItem, opts commentsOptions, kinds map[string]bool) []pr.CommentItem {
 	var out []pr.CommentItem
+	ignored := ignoredAuthorSet(opts.ignoredAuthors)
 	for _, item := range items {
-		filtered, ok := filterCommentItem(item, opts, kinds)
+		filtered, ok := filterCommentItem(item, opts, kinds, ignored)
 		if ok {
 			out = append(out, filtered)
 		}
@@ -255,11 +277,30 @@ func filterCommentItems(items []pr.CommentItem, opts commentsOptions, kinds map[
 	return out
 }
 
-func filterCommentItem(item pr.CommentItem, opts commentsOptions, kinds map[string]bool) (pr.CommentItem, bool) {
+func ignoredAuthorSet(authors []string) map[string]bool {
+	if len(authors) == 0 {
+		return nil
+	}
+	ignored := make(map[string]bool, len(authors))
+	for _, author := range authors {
+		author = strings.TrimSpace(author)
+		if author == "" {
+			continue
+		}
+		ignored[strings.ToLower(author)] = true
+	}
+	return ignored
+}
+
+func filterCommentItem(item pr.CommentItem, opts commentsOptions, kinds map[string]bool, ignored map[string]bool) (pr.CommentItem, bool) {
 	if !kinds[item.Kind] {
 		return pr.CommentItem{}, false
 	}
 	if opts.unresolvedOnly && !isUnresolvedOrAttentionRequired(item) {
+		return pr.CommentItem{}, false
+	}
+	item, ok := filterIgnoredAuthors(item, ignored)
+	if !ok {
 		return pr.CommentItem{}, false
 	}
 	author := strings.TrimSpace(opts.author)
@@ -275,6 +316,41 @@ func filterCommentItem(item pr.CommentItem, opts commentsOptions, kinds map[stri
 		return item, true
 	}
 	return pr.CommentItem{}, false
+}
+
+func filterIgnoredAuthors(item pr.CommentItem, ignored map[string]bool) (pr.CommentItem, bool) {
+	if len(ignored) == 0 {
+		return item, true
+	}
+	item.Replies = filterRepliesByIgnoredAuthors(item.Replies, ignored)
+	if !isIgnoredAuthor(item.Author, ignored) {
+		return item, true
+	}
+	if item.Kind == pr.CommentKindReviewThread && len(item.Replies) > 0 {
+		first := item.Replies[0]
+		item.Author = first.Author
+		item.Body = first.Body
+		item.URL = first.URL
+		item.CreatedAt = first.CreatedAt
+		item.UpdatedAt = first.UpdatedAt
+		item.SubmittedAt = first.SubmittedAt
+		return item, true
+	}
+	return pr.CommentItem{}, false
+}
+
+func filterRepliesByIgnoredAuthors(replies []pr.CommentItem, ignored map[string]bool) []pr.CommentItem {
+	var out []pr.CommentItem
+	for _, reply := range replies {
+		if !isIgnoredAuthor(reply.Author, ignored) {
+			out = append(out, reply)
+		}
+	}
+	return out
+}
+
+func isIgnoredAuthor(author string, ignored map[string]bool) bool {
+	return ignored[strings.ToLower(strings.TrimSpace(author))]
 }
 
 func filterRepliesByAuthor(replies []pr.CommentItem, author string) []pr.CommentItem {

@@ -239,6 +239,8 @@ Safely inspects the current stack. It does not modify commits or push branches, 
 
 Collects pull request conversation comments, reviews, review comments, and review threads across the current stack. It is read-only: it does not modify commits, branches, remotes, pull requests, or comments.
 
+Configured ignored authors from `comments.ignore_authors` are excluded from comments output before any positive `--author` filter is applied.
+
 Options:
 
 ```text
@@ -305,6 +307,9 @@ remote=origin
 target=main
 reviewer=user1,user2
 branch_name_template=$USERNAME/stack
+
+[comments]
+ignore_authors=ci-bot,release-bot
 
 [land]
 style=bottom-only|disable

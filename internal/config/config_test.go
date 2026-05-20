@@ -81,6 +81,9 @@ func TestDefaultsAndMerge(t *testing.T) {
 	if got := c.Get("land", "style"); got != "bottom-only" {
 		t.Errorf("default missing: %q", got)
 	}
+	if got := c.Get("comments", "ignore_authors"); got != "" {
+		t.Errorf("comments.ignore_authors default = %q, want empty", got)
+	}
 }
 
 func TestGetBoolParsesPythonStyle(t *testing.T) {
