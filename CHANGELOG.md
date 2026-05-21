@@ -6,6 +6,8 @@
   `.stack-pr.cfg` with sensible defaults and inline documentation. Fails
   safely if the file already exists. `config <section>.<key>=<value>` remains
   backward-compatible.
+- Added `comments.ignore_authors` config key to filter out noisy automation
+  accounts from `stack-pr comments` output.
 
 ## v1.6.0 – 2026-05-20
 
