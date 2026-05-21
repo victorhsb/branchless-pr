@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/config"
@@ -10,33 +9,64 @@ import (
 
 func configCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "config <section>.<key>=<value>",
-		Short: "Create or update a config setting.",
-		Long:  `Expects exactly one argument in the form <section>.<key>=<value>.`,
-		Args:  cobra.ExactArgs(1),
-		// config does not need git checks or gh username.
+		Use:   "config [init | set <section>.<key>=<value> | <section>.<key>=<value>]",
+		Short: "Manage or update stack-pr configuration.",
+		Long: `Without a subcommand keyword, the argument is treated as a set operation
+(<section>.<key>=<value>), preserving backward compatibility.`,
+		// Config command does not need git checks or gh username.
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error { return nil },
 		RunE: func(cmd *cobra.Command, args []string) error {
-			section, key, value, err := config.ParseConfigArg(args[0])
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-				os.Exit(1)
+			if len(args) == 0 {
+				return cmd.Usage()
 			}
-			// Reload from disk to avoid overwriting concurrent changes.
-			cfgPath, err := config.FilePath()
-			if err != nil {
-				return err
+			if args[0] == "init" {
+				return runConfigInit(cmd)
 			}
-			current, err := config.Load(cfgPath)
-			if err != nil {
-				return err
+			if args[0] == "set" {
+				if len(args) != 2 {
+					return fmt.Errorf("usage: config set <section>.<key>=<value>")
+				}
+				return runConfigSet(cmd, args[1])
 			}
-			current.Set(section, key, value)
-			if err := current.Save(); err != nil {
-				return fmt.Errorf("failed to save config: %w", err)
+			// Legacy inline syntax: config <section>.<key>=<value>
+			if len(args) == 1 {
+				return runConfigSet(cmd, args[0])
 			}
-			fmt.Printf("%s.%s = %s\n", section, key, value)
-			return nil
+			return cmd.Usage()
 		},
 	}
+}
+
+func runConfigInit(cmd *cobra.Command) error {
+	path, err := config.FilePath()
+	if err != nil {
+		return err
+	}
+	if err := config.WriteDefaults(path); err != nil {
+		return err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Created %s\n", path)
+	return nil
+}
+
+func runConfigSet(cmd *cobra.Command, arg string) error {
+	section, key, value, err := config.ParseConfigArg(arg)
+	if err != nil {
+		return err
+	}
+	// Reload from disk to avoid overwriting concurrent changes.
+	cfgPath, err := config.FilePath()
+	if err != nil {
+		return err
+	}
+	current, err := config.Load(cfgPath)
+	if err != nil {
+		return err
+	}
+	current.Set(section, key, value)
+	if err := current.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s.%s = %s\n", section, key, value)
+	return nil
 }

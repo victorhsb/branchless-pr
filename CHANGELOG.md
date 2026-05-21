@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.7.0 – 2026-05-20
+
+- Added `stack-pr config init`, a subcommand that scaffolds a starter
+  `.stack-pr.cfg` with sensible defaults and inline documentation. Fails
+  safely if the file already exists. `config <section>.<key>=<value>` remains
+  backward-compatible.
+
 ## v1.6.0 – 2026-05-20
 
 - Added `stack-pr checks`, a read-only stack-wide report for GitHub check

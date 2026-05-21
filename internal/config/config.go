@@ -235,3 +235,62 @@ func orderedKeysNested(m map[string]map[string]string) []string {
 	}
 	return keys
 }
+
+// defaultContents is the initial .stack-pr.cfg with documented defaults.
+const defaultContents = `# stack-pr configuration file
+# See https://github.com/victorhsb/branchless-pr for full documentation.
+
+[common]
+# Enable verbose git/gh subprocess output
+verbose = false
+
+# Enable terminal hyperlinks in output
+hyperlinks = true
+
+# Create PRs as drafts by default
+draft = false
+
+# Reuse existing PR body on update instead of replacing it
+keep_body = false
+
+# Automatically stash uncommitted changes before submitting
+stash = false
+
+# Show tips and hints after commands
+show_tips = true
+
+[repo]
+# Default remote name
+remote = origin
+
+# Default target branch for PRs
+target = main
+
+# Template for generated branch names. Must contain $ID.
+# Supported substitutions: $USERNAME, $ID.
+branch_name_template = $USERNAME/stack
+
+# Default PR reviewers (comma-separated GitHub usernames, or empty)
+reviewer =
+
+[comments]
+# Comma-separated list of GitHub usernames whose review comments to ignore
+ignore_authors =
+
+[land]
+# Landing style: "bottom-only" merges only the bottom PR, "all" merges the whole stack.
+# Set to "disable" to remove the land subcommand entirely.
+style = bottom-only
+`
+
+// WriteDefaults writes a starter .stack-pr.cfg to path.
+// It returns an error if the file already exists.
+func WriteDefaults(path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("config file already exists: %s (delete it first if you want to regenerate)", path)
+	}
+	if err := os.WriteFile(path, []byte(defaultContents), 0o644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+	return nil
+}

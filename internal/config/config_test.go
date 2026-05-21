@@ -86,6 +86,53 @@ func TestDefaultsAndMerge(t *testing.T) {
 	}
 }
 
+func TestWriteDefaultsMatchesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".stack-pr.cfg")
+
+	if err := WriteDefaults(path); err != nil {
+		t.Fatalf("WriteDefaults: %v", err)
+	}
+
+	generated, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load generated: %v", err)
+	}
+	defaults := Defaults()
+
+	// Every key in defaults must exist in generated with the same value.
+	for section, keys := range defaults.sections {
+		for key, value := range keys {
+			got := generated.Get(section, key)
+			if got != value {
+				t.Errorf("generated.Get(%q, %q) = %q, want %q", section, key, got, value)
+			}
+		}
+	}
+
+	// Every key in generated must exist in defaults with the same value.
+	for section, keys := range generated.sections {
+		for key, value := range keys {
+			got := defaults.Get(section, key)
+			if got != value {
+				t.Errorf("defaults.Get(%q, %q) = %q, want %q", section, key, got, value)
+			}
+		}
+	}
+}
+
+func TestWriteDefaultsGuardOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".stack-pr.cfg")
+
+	if err := WriteDefaults(path); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := WriteDefaults(path); err == nil {
+		t.Fatal("expected error on second write, got nil")
+	}
+}
+
 func TestGetBoolParsesPythonStyle(t *testing.T) {
 	c := &Config{sections: map[string]map[string]string{}}
 	c.Set("x", "a", "TRUE")

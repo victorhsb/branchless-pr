@@ -153,8 +153,8 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 				OrigBranch: origBranch,
 			}
 
-			// --- Steps below are skipped for config command ---
-			if cmd.Name() == "config" {
+			// --- Steps below are skipped for config command subtree ---
+			if commandInSubtree(cmd, "config") {
 				cmd.SetContext(newContextFromApp(appCtx))
 				return nil
 			}
@@ -173,7 +173,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			}
 
 			// Require clean repo (all except read-only inspection/config commands)
-			if cmd.Name() != "view" && cmd.Name() != "comments" && cmd.Name() != "checks" && cmd.Name() != "config" {
+			if cmd.Name() != "view" && cmd.Name() != "comments" && cmd.Name() != "checks" && !commandInSubtree(cmd, "config") {
 				if err := RequireCleanRepo(); err != nil {
 					return err
 				}

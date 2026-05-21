@@ -272,12 +272,19 @@ Lands the bottom-most PR in the stack using GitHub squash merge, then rebases re
 
 Removes stack metadata from commits, deletes local generated branches, and deletes matching remote generated branches. The current implementation does not call `gh pr close`; although README text describes closing PRs, the code only strips metadata and deletes branches.
 
-#### `stack-pr config <section>.<key>=<value>`
+#### `stack-pr config init`
 
-Creates or updates a setting in the config file. It does not require command-specific options. It expects exactly the form:
+Generates a starter `.stack-pr.cfg` file at the repository root. The file is created with all documented default values and inline comments. If the file already exists, the command prints an error and exits with status 1 without overwriting.
+
+#### `stack-pr config set <section>.<key>=<value>`
+
+Creates or updates a single setting in the config file.
+
+For backward compatibility, the `set` keyword may be omitted and the command
+interprets positional arguments directly:
 
 ```text
-<section>.<key>=<value>
+stack-pr config <section>.<key>=<value>
 ```
 
 Invalid formats print a usage error and exit with status 1.
