@@ -21,6 +21,7 @@ var CommandKeys = []string{
 	"submit",
 	"land",
 	"abandon",
+	"config",
 }
 
 // Commands is the shared registry of user-facing stack-pr command metadata.
@@ -133,6 +134,23 @@ var Commands = map[string]AgentCommandSpec{
 		Never: []string{
 			"Run to close or merge pull requests.",
 			"Run as a cleanup step after an unrelated failure unless the user confirms.",
+		},
+	},
+	"config": {
+		Name:        "stack-pr config",
+		Purpose:     "Read or write the .stack-pr.cfg configuration file.",
+		SideEffects: true,
+		Effects: []string{
+			"Writes to .stack-pr.cfg in the repository root.",
+			"May create the file if it does not exist.",
+		},
+		SafeBefore: []string{
+			"The user explicitly requests a configuration change.",
+			"The working directory is at the repository root.",
+		},
+		Never: []string{
+			"Modify configuration as part of normal stack operations.",
+			"Assume the repository root is known without verification.",
 		},
 	},
 }

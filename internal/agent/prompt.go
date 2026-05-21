@@ -12,6 +12,7 @@ const (
 	TopicSubmit   = "submit"
 	TopicLand     = "land"
 	TopicAbandon  = "abandon"
+	TopicConfig   = "config"
 	TopicRecovery = "recovery"
 	TopicAll      = "all"
 )
@@ -23,6 +24,7 @@ var TopicOrder = []string{
 	TopicSubmit,
 	TopicLand,
 	TopicAbandon,
+	TopicConfig,
 	TopicRecovery,
 }
 
@@ -130,6 +132,21 @@ var topics = map[string]topicSpec{
 			"Do not use abandon to merge PRs, close PRs, or recover automatically after unrelated errors.",
 		},
 	},
+	TopicConfig: {
+		Name:    TopicConfig,
+		Title:   "Config",
+		Summary: "Guidance for managing stack-pr configuration.",
+		Narrative: []string{
+			"stack-pr config is used to read or write the local .stack-pr.cfg file.",
+			"Configuration changes are local-only and do not affect remote repositories or pull requests.",
+		},
+		CommandKeys: []string{"config"},
+		Rules: []string{
+			"Only modify configuration when the user explicitly requests a change.",
+			"Ensure the working directory is at the repository root before writing configuration.",
+			"Do not modify configuration as part of normal stack operations.",
+		},
+	},
 	TopicRecovery: {
 		Name:    TopicRecovery,
 		Title:   "Recovery",
@@ -138,7 +155,7 @@ var topics = map[string]topicSpec{
 			"When a stack-pr command fails, stop and inspect the error before running another mutating command.",
 			"Prefer read-only inspection and user guidance over automatic cleanup.",
 		},
-		CommandKeys: []string{"view", "comments", "submit --dry-run", "submit", "land", "abandon"},
+		CommandKeys: []string{"view", "comments", "submit --dry-run", "submit", "land", "abandon", "config"},
 		Rules: []string{
 			"Do not run a destructive command as recovery unless the user explicitly asks for that recovery action.",
 			"If a rebase is in progress, ask the user whether to continue, abort, or resolve conflicts before submitting again.",

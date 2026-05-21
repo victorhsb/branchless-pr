@@ -30,6 +30,10 @@ Prefer read-only commands first, and ask before commands that mutate Git, branch
   - Rebases commits and the original branch.
   - Deletes generated local branches.
   - Deletes matching generated remote branches when present.
+- `stack-pr config` — Read or write the .stack-pr.cfg configuration file. Side effects: yes.
+  Effects:
+  - Writes to .stack-pr.cfg in the repository root.
+  - May create the file if it does not exist.
 
 ## Rules
 

@@ -157,6 +157,7 @@ func TestRenderJSONSideEffectMetadata(t *testing.T) {
 		"stack-pr submit":           true,
 		"stack-pr land":             true,
 		"stack-pr abandon":          true,
+		"stack-pr config":           true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("side effects = %#v, want %#v", got, want)
