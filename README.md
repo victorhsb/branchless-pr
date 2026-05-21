@@ -111,7 +111,9 @@ stack-pr abandon
 - `stack-pr checks` — report all CI checks and brief review-attention state across the stack.
 - `stack-pr land` — squash-merge the bottom PR and rebase the rest.
 - `stack-pr abandon` — strip stack metadata and delete generated branches.
-- `stack-pr config <section>.<key>=<value>` — write a setting to `.stack-pr.cfg`.
+- `stack-pr config init` — scaffold a starter `.stack-pr.cfg` with sensible defaults.
+- `stack-pr config set <section>.<key>=<value>` (or legacy `config <section>.<key>=<value>`) — write a setting to `.stack-pr.cfg`.
+
 - `stack-pr agent prompt [topic]` — emit static, versioned guidance for LLM agents.
 - `stack-pr agent diagnose [--format text|json] [--online]` — emit a read-only, best-effort diagnostic report for agents.
 
@@ -258,15 +260,62 @@ The initial JSON schema version is `"1"`. The JSON envelope contains:
   `potential_next_actions`. `stack-pr land` is never the primary
   recommendation; if surfaced, it requires explicit confirmation.
 
+## Config init
+
+`stack-pr config init` scaffolds a starter `.stack-pr.cfg` at the repository root with sensible defaults and inline documentation. It fails safely if the file already exists.
+
+```bash
+stack-pr config init
+```
+
+After the file is created you can edit it by hand or set individual values inline with `stack-pr config set`.
+
 ## Configuration
 
-Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). Example:
+Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). The file uses INI syntax: `[section]` headers followed by `key = value` lines.
+
+### All settings
+
+#### `[common]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `verbose` | bool | `false` | Show verbose subprocess output (`git` / `gh`) for every command. |
+| `hyperlinks` | bool | `true` | Enable terminal hyperlinks (e.g. clickable PR URLs). Use `--no-hyperlinks` to disable on a single run. |
+| `draft` | bool | `false` | Create **new** PRs as drafts by default. Only affects PRs created with `stack-pr submit`. |
+| `keep_body` | bool | `false` | Preserve the existing PR body after the generated stack TOC on update. Without this, the body is replaced. |
+| `stash` | bool | `false` | Automatically stash uncommitted changes before `submit` / `export`. Skipped under `--dry-run`. |
+| `show_tips` | bool | `true` | Show contextual tips/hints after commands (e.g. next recommended action). |
+
+#### `[repo]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `remote` | string | `origin` | Git remote name used for pushes and merge-base calculation. |
+| `target` | string | `main` | Remote branch that the bottom PR targets (e.g. `main`, `master`). |
+| `reviewer` | string | *(empty)* | Comma-separated GitHub usernames to add as reviewers on new PRs. |
+| `branch_name_template` | string | `$USERNAME/stack` | Template for generated branch names. **Must contain `$ID`**. Supported substitutions: `$USERNAME`, `$ID`. |
+
+#### `[comments]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ignore_authors` | string | *(empty)* | Comma-separated GitHub usernames whose review comments are hidden from `stack-pr comments` output by default. |
+
+#### `[land]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `style` | string | `bottom-only` | `bottom-only` merges the bottom PR and rebases the rest. `all` merges the whole stack. `disable` removes the `land` subcommand entirely. |
+
+### Example file
 
 ```ini
 [common]
 verbose = false
 hyperlinks = true
 show_tips = true
+stash = false
 
 [repo]
 remote = origin
@@ -282,3 +331,4 @@ style = bottom-only
 ```
 
 Setting `land.style = disable` removes the `land` subcommand entirely.
+
