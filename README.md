@@ -4,9 +4,8 @@
 
 A stack is the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`); every higher PR targets the generated branch for the previous commit. This way each PR review shows only one logical commit while still preserving dependency order.
 
-> **Alias:** `bpr` ("branchless PR") is a shorter alias for `stack-pr`. It
-> ships as an identical binary with the same commands, flags, and config file.
-> See the [Install](#install) section below for setup options.
+> **Alias:** `bpr` ("branchless PR") is the primary binary name. A `stack-pr`
+> symlink is provided for backward compatibility with the original Python tool.
 
 ## Install
 
@@ -24,50 +23,33 @@ docker pull ghcr.io/victorhsb/branchless-pr:latest
 docker run --rm ghcr.io/victorhsb/branchless-pr:latest version
 ```
 
+### One-line installer (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/victorhsb/branchless-pr/main/install.sh | sh
+```
+
+Installs `bpr` to `~/.local/bin` and creates a `stack-pr` symlink for backward compatibility. Pass `-y` to skip the confirmation prompt. See `install.sh --help` for options.
+
 ### Pre-built binaries
 
-Download from [Releases](https://github.com/victorhsb/branchless-pr/releases). Extract and place `stack-pr` in your `$PATH`.
+Download from [Releases](https://github.com/victorhsb/branchless-pr/releases). Extract and place `bpr` in your `$PATH`. Optionally create a symlink: `ln -s bpr stack-pr`.
 
 ### Go install
 
 ```bash
-go install github.com/victorhsb/branchless-pr/cmd/stack-pr@latest
-# shorter alias binary
-alias bpr='stack-pr'
+go install github.com/victorhsb/branchless-pr/cmd/bpr@latest
 ```
-
-> Installing the binary via `go install` only provides `stack-pr`. For a
-> standalone `bpr` binary, use `make install-bpr` (see [Build from
-> source](#build-from-source)) or add a shell alias.
 
 ### Build from source
 
 ```bash
 git clone https://github.com/victorhsb/branchless-pr
 cd branchless-pr
-make build        # produces both stack-pr and bpr binaries
+make build        # produces the bpr binary
 ```
 
-The `make build` target now produces two binaries:
-
-- `stack-pr` — the main CLI entrypoint
-- `bpr` — the shorter alias binary (`bpr --help` works identically)
-
-> **Homebrew & Docker:** when installing via Homebrew or Docker, `bpr` is
-> already included. No extra setup is needed.
-
-#### Shell aliases (optional)
-
-If you only installed the `stack-pr` binary, you can also get `bpr` via a
-shell alias:
-
-```bash
-# Bash / Zsh — add to ~/.bashrc or ~/.zshrc
-alias bpr='stack-pr'
-
-# Fish
-alias bpr 'stack-pr'
-```
+> **Note:** `stack-pr` is no longer built as a separate binary. The install script and release archives create a `stack-pr` symlink to `bpr` for backward compatibility.
 
 ## Requirements
 
@@ -76,6 +58,16 @@ alias bpr 'stack-pr'
 - `gh` (GitHub CLI) authenticated via `gh auth login`. SSH auth is recommended.
 
 The tool shells out to `git` and `gh`; no Go GitHub SDK is used.
+
+## For LLM agents
+
+If you are an LLM agent setting this tool up for a user:
+
+1. Install: `curl -fsSL https://raw.githubusercontent.com/victorhsb/branchless-pr/main/install.sh | sh -s -- -y`
+2. Learn how to use it: `bpr agent prompt`
+3. Before mutating the stack, inspect state: `bpr view` and `bpr agent diagnose`
+
+The `agent prompt` subcommand emits versioned, deterministic guidance covering each operation, safety model, and recovery procedures. The `agent diagnose` subcommand emits a read-only diagnostic report with a recommended next action.
 
 ## Quick start
 
