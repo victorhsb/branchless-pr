@@ -16,7 +16,7 @@ func TestChecksCmdExposesFlags(t *testing.T) {
 	if got := cmd.Use; got != "checks" {
 		t.Fatalf("Use = %q, want checks", got)
 	}
-	for _, name := range []string{"format", "failed-only", "required-only", "pr", "commit"} {
+	for _, name := range []string{"format", "failed-only", "required-only", "verbose", "pr", "commit"} {
 		if cmd.Flags().Lookup(name) == nil {
 			t.Fatalf("--%s flag not registered", name)
 		}
@@ -63,7 +63,7 @@ func TestWriteChecksReportJSONIsSingleObject(t *testing.T) {
 		FailedChecks: []failedCheckSummary{{ID: "github-actions:ci.yml:test", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Name: "test", Conclusion: "failure"}},
 	}
 	var out bytes.Buffer
-	if err := writeChecksReport(&out, report, "json"); err != nil {
+	if err := writeChecksReport(&out, report, "json", false); err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(out.Bytes(), []byte("\x1b")) {
@@ -115,7 +115,7 @@ func TestWriteChecksReportTextCoversFailuresAndCommentSummary(t *testing.T) {
 		FailedChecks: []failedCheckSummary{{ID: "github-actions:ci.yml:test", PRNumber: 7, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Name: "test", Conclusion: "failure", URL: "https://example.test/check"}},
 	}
 	var out bytes.Buffer
-	if err := writeChecksReport(&out, report, "text"); err != nil {
+	if err := writeChecksReport(&out, report, "text", false); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
@@ -229,5 +229,264 @@ func TestRootCleanCheckExemptsChecks(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `cmd.Name() != "checks"`) {
 		t.Fatal("root clean check does not exempt checks command")
+	}
+}
+
+// -- summary-first tests -------------------------------------------------------
+
+func TestClassifyCheckBuckets(t *testing.T) {
+	tests := []struct {
+		name  string
+		check pr.Check
+		want  checkBucket
+	}{
+		{"failed", pr.Check{Conclusion: "failure"}, bucketFailing},
+		{"error", pr.Check{Conclusion: "error"}, bucketFailing},
+		{"success", pr.Check{Conclusion: "success"}, bucketPassing},
+		{"skipped", pr.Check{Conclusion: "skipped"}, bucketSkipped},
+		{"neutral", pr.Check{Conclusion: "neutral"}, bucketSkipped},
+		{"cancelled", pr.Check{Conclusion: "cancelled"}, bucketSkipped},
+		{"in_progress", pr.Check{Status: "in_progress"}, bucketInProgress},
+		{"pending", pr.Check{Status: "pending"}, bucketPending},
+		{"queued", pr.Check{Status: "queued"}, bucketPending},
+		{"waiting", pr.Check{Status: "waiting"}, bucketPending},
+		{"completed_success", pr.Check{Status: "completed", Conclusion: "success"}, bucketPassing},
+		{"completed_unknown", pr.Check{Status: "completed", Conclusion: "cancelled"}, bucketSkipped},
+		{"action_required", pr.Check{Conclusion: "action_required"}, bucketFailing},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyCheck(tc.check)
+			if got != tc.want {
+				t.Fatalf("classifyCheck(%+v) = %q, want %q", tc.check, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollapseVisibleChecks(t *testing.T) {
+	checks := []pr.Check{
+		{ID: "a", Name: "Build", Status: "completed", Conclusion: "success"},
+		{ID: "a", Name: "Build", Status: "in_progress"},
+		{ID: "b", Name: "Test", Status: "completed", Conclusion: "failure"},
+		{ID: "b", Name: "Test", Status: "completed", Conclusion: "skipped"},
+		{ID: "c", Name: "Lint", Status: "pending"},
+	}
+	collapsed := collapseVisibleChecks(checks)
+	if len(collapsed) != 3 {
+		t.Fatalf("collapsed len = %d, want 3", len(collapsed))
+	}
+	// a: most actionable is in-progress
+	if collapsed[0].Identity != "a" || collapsed[0].Bucket != bucketInProgress || collapsed[0].Count != 2 {
+		t.Fatalf("a collapsed = %+v", collapsed[0])
+	}
+	// b: most actionable is failing
+	if collapsed[1].Identity != "b" || collapsed[1].Bucket != bucketFailing || collapsed[1].Count != 2 {
+		t.Fatalf("b collapsed = %+v", collapsed[1])
+	}
+	// c: pending
+	if collapsed[2].Identity != "c" || collapsed[2].Bucket != bucketPending || collapsed[2].Count != 1 {
+		t.Fatalf("c collapsed = %+v", collapsed[2])
+	}
+}
+
+func TestSummarizePRChecks(t *testing.T) {
+	checks := []pr.Check{
+		{ID: "a", Name: "Build", Conclusion: "success"},
+		{ID: "b", Name: "Test", Conclusion: "failure"},
+		{ID: "c", Name: "Lint", Conclusion: "skipped"},
+		{ID: "d", Name: "Deploy", Status: "in_progress"},
+		{ID: "b", Name: "Test", Conclusion: "failure"}, // duplicate failing
+	}
+	s := summarizePRChecks(checks)
+	if s.Total != 5 {
+		t.Fatalf("total = %d, want 5", s.Total)
+	}
+	if s.Passing != 1 || s.Failing != 2 || s.Skipped != 1 || s.InProgress != 1 || s.Pending != 0 || s.Unknown != 0 {
+		t.Fatalf("counts = %+v", s)
+	}
+	if len(s.FailedIDs) != 1 || s.FailedIDs[0] != "b" {
+		t.Fatalf("failed IDs = %v, want [b]", s.FailedIDs)
+	}
+	if len(s.FailedNames) != 1 || s.FailedNames[0] != "Test" {
+		t.Fatalf("failed names = %v, want [Test]", s.FailedNames)
+	}
+}
+
+func TestWriteChecksTextSummaryFirst(t *testing.T) {
+	report := &checksReport{
+		SchemaVersion: "1",
+		Command:       "stack-pr checks",
+		Range:         checksRange{Base: "main", Head: "HEAD", Remote: "origin", Target: "main"},
+		Stack: []checksStackEntry{
+			{Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched"},
+		},
+		PullRequests: []checksPullRequestReport{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched", PRNumber: 7,
+			Checks: []pr.Check{
+				{ID: "github-actions:ci.yml:test", Provider: pr.CheckProviderGitHubActions, Name: "test", Status: "completed", Conclusion: "failure", Required: pr.RequiredUnknown, URL: "https://example.test/check"},
+				{ID: "github-actions:ci.yml:lint", Provider: pr.CheckProviderGitHubActions, Name: "lint", Status: "completed", Conclusion: "success", Required: pr.RequiredFalse},
+			},
+		}},
+		FailedChecks: []failedCheckSummary{
+			{ID: "github-actions:ci.yml:test", PRNumber: 7, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Name: "test", Conclusion: "failure", URL: "https://example.test/check"},
+		},
+	}
+	var out bytes.Buffer
+	if err := writeChecksReport(&out, report, "text", false); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+
+	// Stack coverage
+	if !strings.Contains(text, "Stack:") {
+		t.Fatalf("missing stack coverage:\n%s", text)
+	}
+
+	// Failed checks prominent
+	if !strings.Contains(text, "## Failed checks") {
+		t.Fatalf("missing failed checks section:\n%s", text)
+	}
+
+	// Per-PR roll-up
+	if !strings.Contains(text, "Roll-up:") {
+		t.Fatalf("missing roll-up:\n%s", text)
+	}
+	if !strings.Contains(text, "1 failing") || !strings.Contains(text, "1 passing") {
+		t.Fatalf("roll-up counts wrong:\n%s", text)
+	}
+	if !strings.Contains(text, "Failed: test") {
+		t.Fatalf("missing failed list:\n%s", text)
+	}
+
+	// Default collapsed checks shown
+	if !strings.Contains(text, "- failing `github-actions:ci.yml:test` test") {
+		t.Fatalf("missing collapsed check line:\n%s", text)
+	}
+	if !strings.Contains(text, "- passing `github-actions:ci.yml:lint` lint") {
+		t.Fatalf("missing collapsed check line:\n%s", text)
+	}
+
+	// required: unknown omitted in default text
+	if strings.Contains(text, "required: unknown") {
+		t.Fatalf("default text should not contain 'required: unknown':\n%s", text)
+	}
+}
+
+func TestWriteChecksTextVerbose(t *testing.T) {
+	report := &checksReport{
+		SchemaVersion: "1",
+		Command:       "stack-pr checks",
+		Range:         checksRange{Base: "main", Head: "HEAD", Remote: "origin", Target: "main"},
+		Stack: []checksStackEntry{
+			{Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched"},
+		},
+		PullRequests: []checksPullRequestReport{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched", PRNumber: 7,
+			Checks: []pr.Check{
+				{ID: "github-actions:ci.yml:test", Provider: pr.CheckProviderGitHubActions, Name: "test", Status: "completed", Conclusion: "failure", Required: pr.RequiredUnknown, URL: "https://example.test/check"},
+				{ID: "github-actions:ci.yml:lint", Provider: pr.CheckProviderGitHubActions, Name: "lint", Status: "completed", Conclusion: "success", Required: pr.RequiredFalse},
+			},
+		}},
+		FailedChecks: []failedCheckSummary{
+			{ID: "github-actions:ci.yml:test", PRNumber: 7, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Name: "test", Conclusion: "failure", URL: "https://example.test/check"},
+		},
+	}
+	var out bytes.Buffer
+	if err := writeChecksReport(&out, report, "text", true); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+
+	// Verbose still has summary
+	if !strings.Contains(text, "Roll-up:") {
+		t.Fatalf("verbose missing roll-up:\n%s", text)
+	}
+
+	// Verbose renders full per-check detail
+	if !strings.Contains(text, "Checks:") {
+		t.Fatalf("verbose missing Checks section:\n%s", text)
+	}
+	if !strings.Contains(text, "github-actions:ci.yml:test") {
+		t.Fatalf("verbose missing check ID:\n%s", text)
+	}
+	if !strings.Contains(text, "github-actions:ci.yml:lint") {
+		t.Fatalf("verbose missing check ID:\n%s", text)
+	}
+
+	// Verbose preserves required state, including unknown
+	foundUnknown := false
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "github-actions:ci.yml:test") && strings.Contains(line, "required: unknown") {
+			foundUnknown = true
+		}
+		if strings.Contains(line, "github-actions:ci.yml:lint") && strings.Contains(line, "required: false") {
+			// ok
+		}
+	}
+	if !foundUnknown {
+		t.Fatalf("verbose should preserve required: unknown for test:\n%s", text)
+	}
+}
+
+func TestWriteChecksTextEmptyChecks(t *testing.T) {
+	report := &checksReport{
+		SchemaVersion: "1",
+		Command:       "stack-pr checks",
+		Range:         checksRange{Base: "main", Head: "HEAD", Remote: "origin", Target: "main"},
+		Stack: []checksStackEntry{
+			{Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched"},
+		},
+		PullRequests: []checksPullRequestReport{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched", PRNumber: 7,
+		}},
+	}
+	var out bytes.Buffer
+	if err := writeChecksReport(&out, report, "text", false); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "No checks were found") {
+		t.Fatalf("missing no-checks message:\n%s", text)
+	}
+}
+
+func TestJSONPreservesRequiredState(t *testing.T) {
+	report := &checksReport{
+		SchemaVersion: "1",
+		Command:       "stack-pr checks",
+		Repository:    "/repo",
+		Range:         checksRange{Base: "main", Head: "HEAD", Remote: "origin", Target: "main"},
+		Stack: []checksStackEntry{
+			{Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched"},
+		},
+		PullRequests: []checksPullRequestReport{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched",
+			Checks: []pr.Check{
+				{ID: "a", Name: "A", Conclusion: "failure", Required: pr.RequiredUnknown},
+				{ID: "b", Name: "B", Conclusion: "success", Required: pr.RequiredFalse},
+			},
+		}},
+	}
+	var out bytes.Buffer
+	if err := writeChecksReport(&out, report, "json", false); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		PullRequests []struct {
+			Checks []struct {
+				Required string `json:"required"`
+			} `json:"checks"`
+		} `json:"pull_requests"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	got := payload.PullRequests[0].Checks
+	if len(got) != 2 {
+		t.Fatalf("checks len = %d, want 2", len(got))
+	}
+	if got[0].Required != "unknown" || got[1].Required != "false" {
+		t.Fatalf("required = %v, want [unknown false]", []string{got[0].Required, got[1].Required})
 	}
 }

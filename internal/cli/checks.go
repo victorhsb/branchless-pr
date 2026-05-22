@@ -19,6 +19,7 @@ type checksOptions struct {
 	requiredOnly bool
 	prNumber     int
 	commit       string
+	verbose      bool
 }
 
 type checksFetcher func(prRef string) (*pr.PullRequestChecks, error)
@@ -29,7 +30,9 @@ func checksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "checks",
 		Short: "Report CI and review-attention state across the current stack.",
-		Long:  `Read-only report of all GitHub checks for the current stack, with stable failed-check IDs and brief comment summaries. Use stack-pr comments for full comment inspection.`,
+		Long: `Read-only report of GitHub checks across the current stack.
+
+By default the output is summary-first: a compact roll-up per pull request with check counts, failed-check names, and lightweight comment/review counts. Use --verbose to include full per-check detail in text output. Use stack-pr comments for full comment inspection.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, ok := FromContext(cmd.Context())
 			if !ok {
@@ -41,6 +44,7 @@ func checksCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.format, "format", "text", `Output format: "text" or "json"`)
 	cmd.Flags().BoolVar(&opts.failedOnly, "failed-only", false, "Show only failed checks with their stack context")
 	cmd.Flags().BoolVar(&opts.requiredOnly, "required-only", false, "Show only checks known to be required")
+	cmd.Flags().BoolVar(&opts.verbose, "verbose", false, "Include full per-check detail in text output")
 	cmd.Flags().IntVar(&opts.prNumber, "pr", 0, "Only show the stack entry associated with this pull request number")
 	cmd.Flags().StringVar(&opts.commit, "commit", "", "Only show the stack entry matching this full or unambiguous abbreviated commit SHA")
 	return cmd
@@ -61,7 +65,7 @@ func runChecksWithFetcher(app *AppContext, opts checksOptions, w io.Writer, fetc
 	if err != nil {
 		return err
 	}
-	return writeChecksReport(w, report, opts.format)
+	return writeChecksReport(w, report, opts.format, opts.verbose)
 }
 
 type checksReport struct {
@@ -317,10 +321,10 @@ func stackIndex(st stack.Stack, entry *stack.Entry) int {
 	return 0
 }
 
-func writeChecksReport(w io.Writer, report *checksReport, format string) error {
+func writeChecksReport(w io.Writer, report *checksReport, format string, verbose bool) error {
 	switch format {
 	case "text":
-		writeChecksText(w, report)
+		writeChecksText(w, report, verbose)
 		return nil
 	case "json":
 		payload, err := json.MarshalIndent(report, "", "  ")
@@ -334,14 +338,240 @@ func writeChecksReport(w io.Writer, report *checksReport, format string) error {
 	}
 }
 
-func writeChecksText(w io.Writer, report *checksReport) {
+// -- summary-first text output -------------------------------------------------
+
+type checkBucket string
+
+const (
+	bucketPassing    checkBucket = "passing"
+	bucketFailing    checkBucket = "failing"
+	bucketInProgress checkBucket = "in-progress"
+	bucketPending    checkBucket = "pending"
+	bucketSkipped    checkBucket = "skipped"
+	bucketUnknown    checkBucket = "unknown"
+)
+
+// bucketPriority returns a numeric priority where lower = more actionable.
+func bucketPriority(b checkBucket) int {
+	switch b {
+	case bucketFailing:
+		return 0
+	case bucketInProgress:
+		return 1
+	case bucketPending:
+		return 2
+	case bucketUnknown:
+		return 3
+	case bucketPassing:
+		return 4
+	case bucketSkipped:
+		return 5
+	default:
+		return 6
+	}
+}
+
+func classifyCheck(c pr.Check) checkBucket {
+	if c.Failed() {
+		return bucketFailing
+	}
+	switch strings.ToLower(c.Conclusion) {
+	case "success":
+		return bucketPassing
+	case "skipped", "neutral", "cancelled":
+		return bucketSkipped
+	case "action_required":
+		return bucketUnknown
+	}
+	switch strings.ToLower(c.Status) {
+	case "completed":
+		if strings.ToLower(c.Conclusion) == "success" {
+			return bucketPassing
+		}
+		return bucketUnknown
+	case "in_progress":
+		return bucketInProgress
+	case "queued", "waiting", "pending":
+		return bucketPending
+	default:
+		return bucketUnknown
+	}
+}
+
+// visibleCheckIdentity returns the key used for deduplication in summary text.
+func visibleCheckIdentity(c pr.Check) string {
+	if c.ID != "" {
+		return c.ID
+	}
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.Provider + ":unknown"
+}
+
+// collapsedCheck represents a deduplicated visible check for default text.
+type collapsedCheck struct {
+	Identity string
+	Name     string
+	Bucket   checkBucket
+	Count    int
+	URL      string
+}
+
+// collapseVisibleChecks groups checks by visible identity and keeps the
+// most actionable bucket per group. It preserves deterministic order.
+func collapseVisibleChecks(checks []pr.Check) []collapsedCheck {
+	if len(checks) == 0 {
+		return nil
+	}
+	// Order of first appearance.
+	order := make([]string, 0, len(checks))
+	seen := make(map[string]bool)
+	groups := make(map[string]*collapsedCheck)
+	for _, c := range checks {
+		id := visibleCheckIdentity(c)
+		if !seen[id] {
+			seen[id] = true
+			order = append(order, id)
+			groups[id] = &collapsedCheck{
+				Identity: id,
+				Name:     c.Name,
+				Bucket:   classifyCheck(c),
+				Count:    0,
+				URL:      c.URL,
+			}
+		}
+		g := groups[id]
+		g.Count++
+		b := classifyCheck(c)
+		if bucketPriority(b) < bucketPriority(g.Bucket) {
+			g.Bucket = b
+			g.URL = c.URL
+		}
+	}
+	out := make([]collapsedCheck, 0, len(order))
+	for _, id := range order {
+		out = append(out, *groups[id])
+	}
+	return out
+}
+
+// prCheckSummary computes counts per bucket and returns the dominant state.
+type prCheckSummary struct {
+	Total       int
+	Passing     int
+	Failing     int
+	InProgress  int
+	Pending     int
+	Skipped     int
+	Unknown     int
+	FailedIDs   []string
+	FailedNames []string
+}
+
+func summarizePRChecks(checks []pr.Check) prCheckSummary {
+	var s prCheckSummary
+	s.Total = len(checks)
+	seenFailed := make(map[string]bool)
+	for _, c := range checks {
+		switch classifyCheck(c) {
+		case bucketPassing:
+			s.Passing++
+		case bucketFailing:
+			s.Failing++
+			fid := visibleCheckIdentity(c)
+			if !seenFailed[fid] {
+				seenFailed[fid] = true
+				s.FailedIDs = append(s.FailedIDs, fid)
+				if c.Name != "" {
+					s.FailedNames = append(s.FailedNames, c.Name)
+				} else {
+					s.FailedNames = append(s.FailedNames, fid)
+				}
+			}
+		case bucketInProgress:
+			s.InProgress++
+		case bucketPending:
+			s.Pending++
+		case bucketSkipped:
+			s.Skipped++
+		default:
+			s.Unknown++
+		}
+	}
+	return s
+}
+
+// coverageStats aggregates stack-level coverage.
+type coverageStats struct {
+	StackSize          int
+	WithPRMetadata     int
+	MissingMetadata    int
+	UnreadablePRs      int
+	ActivePRFilter     int
+	ActiveCommitFilter int
+}
+
+func computeCoverage(entries []checksPullRequestReport, stackSize int, prFilter int, commitFilter string) coverageStats {
+	var s coverageStats
+	s.StackSize = stackSize
+	s.ActivePRFilter = prFilter
+	if commitFilter != "" {
+		s.ActiveCommitFilter = 1
+	}
+	for _, e := range entries {
+		switch e.Status {
+		case "missing":
+			s.MissingMetadata++
+		case "failed":
+			s.UnreadablePRs++
+		default:
+			if e.PRNumber != 0 || e.PRURL != "" {
+				s.WithPRMetadata++
+			}
+		}
+	}
+	return s
+}
+
+func writeChecksText(w io.Writer, report *checksReport, verbose bool) {
 	fmt.Fprintf(w, "# stack-pr checks\n\n")
 	fmt.Fprintf(w, "Range: `%s..%s` (%s/%s)\n\n", report.Range.Base, report.Range.Head, report.Range.Remote, report.Range.Target)
+
 	if len(report.PullRequests) == 0 {
 		fmt.Fprintln(w, "No stack entries found.")
 		return
 	}
 
+	// Stack coverage summary
+	cov := computeCoverage(report.PullRequests, len(report.Stack), 0, "")
+	fmt.Fprintf(w, "Stack: %d entr", cov.StackSize)
+	if cov.StackSize == 1 {
+		fmt.Fprint(w, "y")
+	} else {
+		fmt.Fprint(w, "ies")
+	}
+	fmt.Fprintf(w, ", %d with PR metadata", cov.WithPRMetadata)
+	if cov.MissingMetadata > 0 {
+		fmt.Fprintf(w, ", %d missing metadata", cov.MissingMetadata)
+	}
+	if cov.UnreadablePRs > 0 {
+		fmt.Fprintf(w, ", %d unreadable", cov.UnreadablePRs)
+	}
+	if cov.ActivePRFilter != 0 || cov.ActiveCommitFilter != 0 {
+		fmt.Fprint(w, " (filtered")
+		if cov.ActivePRFilter != 0 {
+			fmt.Fprintf(w, " --pr=%d", cov.ActivePRFilter)
+		}
+		if cov.ActiveCommitFilter != 0 {
+			fmt.Fprint(w, " --commit")
+		}
+		fmt.Fprint(w, ")")
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w)
+
+	// Failed checks section (prominent)
 	if len(report.FailedChecks) > 0 {
 		fmt.Fprintln(w, "## Failed checks")
 		fmt.Fprintln(w)
@@ -361,11 +591,22 @@ func writeChecksText(w io.Writer, report *checksReport) {
 		totalChecks += len(entry.Checks)
 	}
 	if totalChecks == 0 {
-		fmt.Fprintf(w, "No checks were found across %d stack entries and %d pull requests.\n\n", len(report.Stack), countKnownCheckPRs(report.PullRequests))
+		fmt.Fprintf(w, "No checks were found across %d stack entr", len(report.Stack))
+		if len(report.Stack) == 1 {
+			fmt.Fprint(w, "y")
+		} else {
+			fmt.Fprint(w, "ies")
+		}
+		fmt.Fprintf(w, " and %d pull request", countKnownCheckPRs(report.PullRequests))
+		if countKnownCheckPRs(report.PullRequests) == 1 {
+			fmt.Fprint(w, ".\n\n")
+		} else {
+			fmt.Fprint(w, "s.\n\n")
+		}
 	}
 
 	for _, entry := range report.PullRequests {
-		writeChecksEntryText(w, entry)
+		writeChecksEntryText(w, entry, verbose)
 	}
 }
 
@@ -379,7 +620,7 @@ func countKnownCheckPRs(entries []checksPullRequestReport) int {
 	return count
 }
 
-func writeChecksEntryText(w io.Writer, entry checksPullRequestReport) {
+func writeChecksEntryText(w io.Writer, entry checksPullRequestReport, verbose bool) {
 	prLabel := formatPRLabel(entry.PRNumber, entry.PRURL)
 	fmt.Fprintf(w, "## %d. %s `%s` (%s)\n\n", entry.Index, entry.Title, entry.ShortSHA, prLabel)
 	fmt.Fprintf(w, "- Head: `%s`\n- Base: `%s`\n", entry.HeadBranch, entry.BaseBranch)
@@ -393,29 +634,97 @@ func writeChecksEntryText(w io.Writer, entry checksPullRequestReport) {
 		fmt.Fprintf(w, "- Warning: %s\n", warning)
 	}
 	writeCommentSummaryText(w, entry.CommentSummary)
+
+	if entry.Status == "missing" || entry.Status == "failed" {
+		fmt.Fprintln(w)
+		return
+	}
+
 	if len(entry.Checks) == 0 {
 		fmt.Fprintln(w, "\nNo checks.")
 		fmt.Fprintln(w)
 		return
 	}
-	fmt.Fprintln(w, "\nChecks:")
-	for _, check := range entry.Checks {
-		marker := "ok"
-		if check.Failed() {
-			marker = "failed"
-		} else if check.Conclusion != "" {
-			marker = check.Conclusion
-		} else if check.Status != "" {
-			marker = check.Status
-		}
-		fmt.Fprintf(w, "- %s `%s` %s", marker, check.ID, check.Name)
-		if check.Required != "" {
-			fmt.Fprintf(w, " (required: %s)", check.Required)
-		}
-		if check.URL != "" {
-			fmt.Fprintf(w, " - %s", check.URL)
+
+	// Per-PR roll-up
+	summary := summarizePRChecks(entry.Checks)
+	writePRCheckRollUp(w, summary)
+
+	// In verbose mode, also render every raw check.
+	if verbose {
+		fmt.Fprintln(w, "\nChecks:")
+		for _, check := range entry.Checks {
+			writeCheckLine(w, check, true)
 		}
 		fmt.Fprintln(w)
+		return
+	}
+
+	// Default mode: collapsed summary of visible checks.
+	collapsed := collapseVisibleChecks(entry.Checks)
+	if len(collapsed) > 0 {
+		fmt.Fprintln(w, "\nChecks:")
+		for _, c := range collapsed {
+			marker := string(c.Bucket)
+			if c.Count > 1 {
+				fmt.Fprintf(w, "- %s `%s` %s (%d)\n", marker, c.Identity, c.Name, c.Count)
+			} else {
+				fmt.Fprintf(w, "- %s `%s` %s\n", marker, c.Identity, c.Name)
+			}
+			if c.URL != "" {
+				fmt.Fprintf(w, "  - %s\n", c.URL)
+			}
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func writePRCheckRollUp(w io.Writer, s prCheckSummary) {
+	if s.Total == 0 {
+		return
+	}
+	parts := make([]string, 0, 6)
+	if s.Failing > 0 {
+		parts = append(parts, fmt.Sprintf("%d failing", s.Failing))
+	}
+	if s.InProgress > 0 {
+		parts = append(parts, fmt.Sprintf("%d in-progress", s.InProgress))
+	}
+	if s.Pending > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending", s.Pending))
+	}
+	if s.Passing > 0 {
+		parts = append(parts, fmt.Sprintf("%d passing", s.Passing))
+	}
+	if s.Skipped > 0 {
+		parts = append(parts, fmt.Sprintf("%d skipped", s.Skipped))
+	}
+	if s.Unknown > 0 {
+		parts = append(parts, fmt.Sprintf("%d unknown", s.Unknown))
+	}
+	if len(parts) > 0 {
+		fmt.Fprintf(w, "\nRoll-up: %s / %d checks\n", strings.Join(parts, ", "), s.Total)
+	}
+	if len(s.FailedNames) > 0 {
+		fmt.Fprintf(w, "Failed: %s\n", strings.Join(s.FailedNames, ", "))
+	}
+}
+
+func writeCheckLine(w io.Writer, check pr.Check, verbose bool) {
+	marker := "ok"
+	if check.Failed() {
+		marker = "failed"
+	} else if check.Conclusion != "" {
+		marker = check.Conclusion
+	} else if check.Status != "" {
+		marker = check.Status
+	}
+	fmt.Fprintf(w, "- %s `%s` %s", marker, check.ID, check.Name)
+	if verbose || (check.Required != "" && check.Required != pr.RequiredUnknown) {
+		fmt.Fprintf(w, " (required: %s)", check.Required)
+	}
+	if check.URL != "" {
+		fmt.Fprintf(w, " - %s", check.URL)
 	}
 	fmt.Fprintln(w)
 }

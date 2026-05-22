@@ -260,6 +260,7 @@ Options:
 --format text|json       Output Markdown-compatible text or machine-readable JSON; default text
 --failed-only            Show only failed checks with enough stack context to identify what failed
 --required-only          Show only checks known to be required
+--verbose                Include full per-check detail in text output; default is summary-first
 --pr                     Show only the stack entry associated with this pull request number
 --commit                 Show only the stack entry matching this full or unambiguous abbreviated SHA
 ```
@@ -702,8 +703,14 @@ Detailed behavior:
 13. Apply `--failed-only` by retaining failed checks and the stack context needed to identify those failures.
 14. Build a top-level failed-check summary in deterministic stack order.
 15. Include lightweight comment and review-attention counts and bounded snippets when available, with guidance to use `stack-pr comments` for full comment inspection.
-16. Render Markdown-compatible text by default, grouped by stack entry in stack order.
-17. With `--format json`, render one JSON object containing `schema_version`, `command`, `repository`, `range`, `stack`, `pull_requests`, and `failed_checks`, with no ANSI escape sequences, terminal hyperlinks, progress logs, or extra stdout text.
+16. Render Markdown-compatible text by default, grouped by stack entry in stack order. Default text is summary-first: it shows a compact per-PR roll-up with check counts, failed-check names and URLs, and lightweight comment/review counts. Exhaustive per-check text detail is available via `--verbose`.
+17. With `--format json`, render one JSON object containing `schema_version`, `command`, `repository`, `range`, `stack`, `pull_requests`, and `failed_checks`, with no ANSI escape sequences, terminal hyperlinks, progress logs, or extra stdout text. JSON preserves all raw checks, required state, and provider identifiers regardless of verbosity.
+
+Summary-first text rules:
+- Duplicate visible check identities are collapsed: the most actionable state is shown per identity. Verbose text renders every raw check.
+- `required: unknown` is omitted from default text lines; it is preserved in JSON and verbose text.
+- Stack coverage is shown at the top: total entries, entries with PR metadata, missing metadata, unreadable PRs, and active filters.
+- Failed checks are listed prominently with semantic IDs and URLs before per-PR groups.
 
 Normalized check fields:
 

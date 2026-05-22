@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.7.1 – 2026-05-21
+
+- Changed `stack-pr checks` default text output to summary-first: a compact
+  stack coverage line, per-PR roll-ups with check counts, and failed-check
+  prominence. Duplicate visible checks are collapsed to the most actionable
+  state. `required: unknown` is omitted from default text lines.
+- Added `--verbose` to `stack-pr checks` for full per-check detail in text
+  output, preserving required state and all raw entries.
+
 ## v1.7.0 – 2026-05-20
 
 - Added `stack-pr config init`, a subcommand that scaffolds a starter

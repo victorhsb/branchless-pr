@@ -106,13 +106,44 @@ The `checks` command SHALL default to human-readable Markdown-compatible text ou
 
 - **WHEN** `stack-pr checks` is invoked without `--format`
 - **THEN** the command SHALL produce text output
-- **AND** the output SHALL group checks by stack entry in deterministic stack order
+- **AND** the output SHALL group pull request summaries by stack entry in deterministic stack order
 - **AND** each group SHALL identify the commit title, short SHA, pull request number, pull request URL, head branch, and base branch when known
+
+#### Scenario: Stack coverage is summarized
+
+- **WHEN** `stack-pr checks` renders text output
+- **THEN** the output SHALL identify the inspected stack size and pull request coverage
+- **AND** it SHALL make missing PR metadata, unreadable pull requests, and active `--pr` or `--commit` filters visible
+
+#### Scenario: Pull request status is summarized
+
+- **WHEN** a stack pull request has check data
+- **THEN** default text output SHALL include a compact roll-up for that pull request
+- **AND** the roll-up SHALL include useful check counts such as passing, failing, in-progress, pending, skipped, and unknown where present
+- **AND** the roll-up SHALL include lightweight comment and review counts when available
+
+#### Scenario: Duplicate checks are collapsed in default text
+
+- **WHEN** default text output includes multiple checks with the same visible check identity
+- **THEN** the output SHALL summarize them as one visible item or count instead of rendering every duplicate check line
+- **AND** the visible state SHALL prefer the most actionable state, including failed before in-progress, pending, successful, skipped, or unknown states
+
+#### Scenario: Unknown required state is omitted from default text
+
+- **WHEN** GitHub does not expose whether a check is required
+- **THEN** default text output SHALL NOT print `required: unknown` for that check
+- **AND** the report SHALL preserve unknown required state in JSON output and verbose text detail
 
 #### Scenario: Failed checks are prominent in text
 
 - **WHEN** any stack pull request has failed checks
 - **THEN** text output SHALL visibly list the failed checks with their semantic check IDs and URLs when available before or within the relevant pull request group
+
+#### Scenario: Verbose text renders full check detail
+
+- **WHEN** `stack-pr checks --verbose` is invoked with text output
+- **THEN** the output SHALL include the summary-first content
+- **AND** it SHALL render every retained check in deterministic order with semantic check ID, name, status or conclusion, required state when available, and URL when available
 
 #### Scenario: Empty checks text report
 
