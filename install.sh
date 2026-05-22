@@ -211,12 +211,15 @@ case "$_ext" in
 	zip) unzip -o -q "${_tmpdir}/${_archive_name}" -d "$_tmpdir" ;;
 esac
 
-_src_binary="${_tmpdir}/${BINARY}"
-if [ ! -f "$_src_binary" ]; then
-	_src_binary="${_tmpdir}/branchless-pr_${INSTALL_VERSION}_${_os}_${_arch}/${BINARY}"
-fi
-if [ ! -f "$_src_binary" ]; then
-	err "could not find ${BINARY} binary in archive"
+_src_binary=""
+for _candidate in "${_tmpdir}/${BINARY}" "${_tmpdir}/${SYMLINK}" "${_tmpdir}/branchless-pr_${INSTALL_VERSION}_${_os}_${_arch}/${BINARY}" "${_tmpdir}/branchless-pr_${INSTALL_VERSION}_${_os}_${_arch}/${SYMLINK}"; do
+	if [ -f "$_candidate" ]; then
+		_src_binary="$_candidate"
+		break
+	fi
+done
+if [ -z "$_src_binary" ]; then
+	err "could not find ${BINARY} or ${SYMLINK} binary in archive"
 fi
 
 mkdir -p "$INSTALL_DIR"
