@@ -69,7 +69,7 @@ func submitImpl(app *AppContext, dryRun, draft, keepBody bool, draftBitmask, rev
 
 	// 2. Rebase guard.
 	if git.IsRebaseInProgress() {
-		return fmt.Errorf("ERROR: Rebase in progress. Finish or abort it before submitting.")
+		return fmt.Errorf("ERROR: Rebase in progress. Finish or abort it before submitting")
 	}
 
 	// 4. Optionally fast-forward local base (skipped in dry-run; mutating).

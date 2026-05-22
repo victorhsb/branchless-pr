@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.7.2 – 2026-05-22
+
+- Fixed `stack-pr view` printing "Stack:" to stdout instead of respecting
+  output redirection (e.g. `stack-pr view > file.txt`).
+- Fixed two `staticcheck` warnings: SA1029 (anonymous struct as context key)
+  in `root.go` and ST1005 (error string ending with punctuation) in `submit.go`.
+- Fixed `TargetExists` to also handle exit code 1 from `git rev-parse` on
+  systems where git returns 1 (not 128) for a non-existent ref, producing a
+  clear error message instead of a generic wrapped error.
+
 ## v1.7.1 – 2026-05-21
 
 - Changed `stack-pr checks` default text output to summary-first: a compact

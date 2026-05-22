@@ -88,7 +88,7 @@ func runView(app *AppContext, format string) error {
 func writeViewStack(w io.Writer, st stack.Stack, format string, links bool) error {
 	switch format {
 	case "text":
-		fmt.Println("Stack:")
+		fmt.Fprintln(w, "Stack:")
 		for _, e := range st.Reverse() {
 			fmt.Fprintln(w, e.PrettyLine(links, true))
 		}

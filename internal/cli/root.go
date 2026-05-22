@@ -27,7 +27,9 @@ var (
 	flagStash          bool
 )
 
-var ctxKey struct{}
+type appContextKey struct{}
+
+var ctxKey appContextKey
 
 // Execute is the entrypoint called from main.go.  progName is the command
 // name shown in CLI help, error messages, and completions (e.g. "stack-pr"

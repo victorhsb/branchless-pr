@@ -401,7 +401,7 @@ func TargetExists(remote, target string) error {
 	)
 	if err != nil {
 		if exitErr := shell.AsExitError(err); exitErr != nil {
-			if exitErr.ExitCode() == 128 {
+			if exitErr.ExitCode() == 128 || exitErr.ExitCode() == 1 {
 				return fmt.Errorf("target branch %s does not exist on remote %s", target, remote)
 			}
 		}
