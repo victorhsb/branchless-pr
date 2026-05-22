@@ -6,21 +6,6 @@ before:
     - go vet ./...
 
 builds:
-  - id: stack-pr
-    main: ./cmd/stack-pr
-    binary: stack-pr
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-      - -X github.com/victorhsb/branchless-pr/internal/cli.version={{.Version}}
   - id: bpr
     main: ./cmd/bpr
     binary: bpr
@@ -41,7 +26,7 @@ checksum:
   name_template: checksums.txt
 
 archives:
-  - id: stack-pr
+  - id: bpr
     formats: [tar.gz]
     format_overrides:
       - goos: windows
