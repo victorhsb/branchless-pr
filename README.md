@@ -9,20 +9,6 @@ A stack is the ordered list of local commits in a Git revision range (`BASE..HEA
 
 ## Install
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew tap victorhsb/tap
-brew install stack-pr
-```
-
-### Docker
-
-```bash
-docker pull ghcr.io/victorhsb/branchless-pr:latest
-docker run --rm ghcr.io/victorhsb/branchless-pr:latest version
-```
-
 ### One-line installer (macOS/Linux)
 
 ```bash
@@ -53,9 +39,11 @@ make build        # produces the bpr binary
 
 ## Requirements
 
-- Go 1.23+
-- `git`
-- `gh` (GitHub CLI) authenticated via `gh auth login`. SSH auth is recommended.
+| Requirement | Notes |
+| ----------- | ----- |
+| Go 1.23+ | Only needed when building from source or using `go install`. |
+| `git` | Required for all stack operations. |
+| `gh` | GitHub CLI, authenticated via `gh auth login`. SSH auth is recommended. |
 
 The tool shells out to `git` and `gh`; no Go GitHub SDK is used.
 
@@ -70,6 +58,8 @@ If you are an LLM agent setting this tool up for a user:
 The `agent prompt` subcommand emits versioned, deterministic guidance covering each operation, safety model, and recovery procedures. The `agent diagnose` subcommand emits a read-only diagnostic report with a recommended next action.
 
 ## Quick start
+
+> All `stack-pr` commands can also be run as `bpr` (the primary binary name).
 
 ```bash
 # create some commits on a feature branch
@@ -97,17 +87,18 @@ stack-pr abandon
 
 ## Commands
 
-- `stack-pr submit` (alias: `export`) — create or update PRs for each commit.
-- `stack-pr view` — inspect the stack without modifying anything.
-- `stack-pr comments` — collect PR comments, reviews, and review threads across the stack.
-- `stack-pr checks` — report all CI checks and brief review-attention state across the stack.
-- `stack-pr land` — squash-merge the bottom PR and rebase the rest.
-- `stack-pr abandon` — strip stack metadata and delete generated branches.
-- `stack-pr config init` — scaffold a starter `.stack-pr.cfg` with sensible defaults.
-- `stack-pr config set <section>.<key>=<value>` (or legacy `config <section>.<key>=<value>`) — write a setting to `.stack-pr.cfg`.
-
-- `stack-pr agent prompt [topic]` — emit static, versioned guidance for LLM agents.
-- `stack-pr agent diagnose [--format text|json] [--online]` — emit a read-only, best-effort diagnostic report for agents.
+| Command | Description |
+| ------- | ----------- |
+| `stack-pr submit` (alias: `export`) | Create or update PRs for each commit. |
+| `stack-pr view` | Inspect the stack without modifying anything. |
+| `stack-pr comments` | Collect PR comments, reviews, and review threads across the stack. |
+| `stack-pr checks` | Report all CI checks and brief review-attention state across the stack. |
+| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. |
+| `stack-pr abandon` | Strip stack metadata and delete generated branches. |
+| `stack-pr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
+| `stack-pr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
+| `stack-pr agent prompt [topic]` | Emit static, versioned guidance for LLM agents. |
+| `stack-pr agent diagnose [--format text\|json] [--online]` | Emit a read-only, best-effort diagnostic report for agents. |
 
 ## Shared options
 
@@ -133,7 +124,7 @@ stack-pr abandon
 | `-s, --stash`     | Stash uncommitted changes during submit. Ignored under `--dry-run`.         |
 | `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes. |
 
-### Previewing with `--dry-run`
+## Previewing with `--dry-run`
 
 `stack-pr submit --dry-run` (and its alias `stack-pr export --dry-run`) prints
 the plan that a real submit would execute — per stack entry: the action
@@ -159,14 +150,12 @@ stack-pr comments --kind review_thread --format json
 stack-pr comments --author octocat
 ```
 
-Flags:
-
-- `--format text|json`: output Markdown-compatible text (default) or a single
-  JSON object for agents.
-- `--unresolved-only`: include only unresolved or attention-required feedback.
-- `--kind`: comma-separated kinds: `conversation`, `review`,
-  `review_comment`, `review_thread`.
-- `--author`: include feedback authored by the given GitHub login.
+| Flag | Description |
+| ---- | ----------- |
+| `--format text\|json` | Output Markdown-compatible text (default) or a single JSON object for agents. |
+| `--unresolved-only` | Include only unresolved or attention-required feedback. |
+| `--kind` | Comma-separated kinds: `conversation`, `review`, `review_comment`, `review_thread`. |
+| `--author` | Include feedback authored by the given GitHub login. |
 
 ## Stack checks
 
@@ -184,18 +173,13 @@ stack-pr checks --pr 123 --format json
 stack-pr checks --commit abc123
 ```
 
-Flags:
-
-- `--format text|json`: output Markdown-compatible text (default) or a single
-  JSON object for agents.
-- `--failed-only`: include only failed checks and the stack context needed to
-  understand them.
-- `--required-only`: include only checks known to be required. Checks whose
-  required state is unknown are excluded by this filter.
-- `--pr`: include only the stack entry associated with the given pull request
-  number.
-- `--commit`: include only the stack entry matching a full or unambiguous
-  abbreviated commit SHA.
+| Flag | Description |
+| ---- | ----------- |
+| `--format text\|json` | Output Markdown-compatible text (default) or a single JSON object for agents. |
+| `--failed-only` | Include only failed checks and the stack context needed to understand them. |
+| `--required-only` | Include only checks known to be required. Checks whose required state is unknown are excluded. |
+| `--pr` | Include only the stack entry associated with the given pull request number. |
+| `--commit` | Include only the stack entry matching a full or unambiguous abbreviated commit SHA. |
 
 ## Agent prompt
 
@@ -229,14 +213,10 @@ stack-pr agent diagnose --format json
 stack-pr agent diagnose --online
 ```
 
-Flags:
-
-- `--format text|json`: output Markdown text (default) or a single JSON document.
-- `--online`: allow optional GitHub checks via `gh`, including GitHub
-  availability and live PR state. Without this flag, diagnose performs no `gh`
-  command invocations and does not contact GitHub. If GitHub appears
-  unavailable, diagnose marks that as blocking for mutating stack operations
-  such as `submit`, `land`, and `abandon`.
+| Flag | Description |
+| ---- | ----------- |
+| `--format text\|json` | Output Markdown text (default) or a single JSON document. |
+| `--online` | Allow optional GitHub checks via `gh`, including GitHub availability and live PR state. Without this flag, diagnose performs no `gh` invocations and does not contact GitHub. If GitHub appears unavailable, diagnose marks that as blocking for mutating stack operations such as `submit`, `land`, and `abandon`. |
 
 The initial JSON schema version is `"1"`. The JSON envelope contains:
 

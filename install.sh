@@ -244,6 +244,12 @@ case ":${PATH}:" in
 		;;
 esac
 
+if ! command -v gh >/dev/null 2>&1; then
+	warn "GitHub CLI ('gh') is not installed. bpr requires gh to interact with GitHub PRs."
+	info "  Install it from: https://cli.github.com"
+	info ""
+fi
+
 info "${YELLOW}Note: the 'stack-pr' binary is deprecated.${NO_COLOR}"
 info "Use '${BINARY}' instead. The '${SYMLINK}' symlink is provided for backward compatibility."
 info ""
