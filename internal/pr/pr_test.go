@@ -92,3 +92,45 @@ func TestParseCreateOutputRejectsEmptyOutput(t *testing.T) {
 		t.Fatalf("error = %q, want unexpected empty output", err.Error())
 	}
 }
+
+func TestViewManyFetchesEachPRRef(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+echo "$@" >> ` + logPath + `
+case "$3" in
+  41)
+    printf '{"baseRefName":"main","headRefName":"alice/stack/1","number":41,"state":"OPEN","body":"body 41","title":"Title 41","url":"https://github.com/acme/repo/pull/41","mergeStateStatus":"CLEAN","isDraft":false}\n'
+    ;;
+  42)
+    printf '{"baseRefName":"alice/stack/1","headRefName":"alice/stack/2","number":42,"state":"OPEN","body":"body 42","title":"Title 42","url":"https://github.com/acme/repo/pull/42","mergeStateStatus":"CLEAN","isDraft":true}\n'
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	got, err := ViewMany([]string{"41", "42"})
+	if err != nil {
+		t.Fatalf("ViewMany returned error: %v", err)
+	}
+	if got["41"].Title != "Title 41" || got["42"].Title != "Title 42" || !got["42"].IsDraft {
+		t.Fatalf("ViewMany result = %+v", got)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if count := strings.Count(string(logBytes), "pr view"); count != 2 {
+		t.Fatalf("gh view calls = %d, want 2\n%s", count, string(logBytes))
+	}
+}

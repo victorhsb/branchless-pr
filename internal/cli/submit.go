@@ -84,9 +84,18 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 	return applyMutations(app, st, needsMeta, isDraft, opts)
 }
 
+const experimentalSubmitEngineEnv = "STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE"
+
+func experimentalSubmitEngineEnabled(app *AppContext) bool {
+	return useExperimentalSubmitEngine(app)
+}
+
 func useExperimentalSubmitEngine(app *AppContext) bool {
-	if os.Getenv("STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE") == "1" {
+	if os.Getenv(experimentalSubmitEngineEnv) == "1" {
 		return true
+	}
+	if app == nil || app.Config == nil {
+		return false
 	}
 	enabled, err := app.Config.GetBool("submit", "experimental_engine")
 	return err == nil && enabled

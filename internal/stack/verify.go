@@ -12,7 +12,7 @@ import (
 // If checkBase is true, it also validates that the baseRefName matches the
 // assigned base branch and that the bottom-most PR is mergeable.
 func Verify(st Stack, checkBase bool) error {
-	return VerifyWithProvider(st, checkBase, pr.View)
+	return VerifyWithInfo(st, checkBase, nil)
 }
 
 // PRInfoProvider returns GitHub state for a PR reference.
@@ -20,6 +20,22 @@ type PRInfoProvider func(prRef string) (*pr.Info, error)
 
 // VerifyWithProvider validates every StackEntry using the supplied PR info provider.
 func VerifyWithProvider(st Stack, checkBase bool, provider PRInfoProvider) error {
+	return verifyWithLookup(st, checkBase, provider)
+}
+
+// VerifyWithInfo validates every StackEntry against GitHub or a caller-provided
+// PR info lookup. Missing lookup entries fall back to gh pr view.
+func VerifyWithInfo(st Stack, checkBase bool, lookup func(prRef string) (*pr.Info, bool)) error {
+	return verifyWithLookup(st, checkBase, func(prRef string) (*pr.Info, error) {
+		info, ok := lookupInfo(lookup, prRef)
+		if ok {
+			return info, nil
+		}
+		return pr.View(prRef)
+	})
+}
+
+func verifyWithLookup(st Stack, checkBase bool, lookup func(prRef string) (*pr.Info, error)) error {
 	for i, e := range st {
 		if e.HasMissingInfo() {
 			return fmt.Errorf("\033[91mERROR: Cannot verify stack: entry %d is missing PR, head, or base info.\033[0m", i)
@@ -30,7 +46,7 @@ func VerifyWithProvider(st Stack, checkBase bool, provider PRInfoProvider) error
 			return fmt.Errorf("\033[91mERROR: Stack entry %d has malformed PR link: %v\033[0m", i, err)
 		}
 
-		info, err := provider(e.PR())
+		info, err := lookup(e.PR())
 		if err != nil {
 			return fmt.Errorf("\033[91mERROR: Cannot verify stack: unable to query PR #%d: %v\033[0m", prNum, err)
 		}
@@ -72,4 +88,12 @@ func VerifyWithProvider(st Stack, checkBase bool, provider PRInfoProvider) error
 		}
 	}
 	return nil
+}
+
+func lookupInfo(lookup func(prRef string) (*pr.Info, bool), prRef string) (*pr.Info, bool) {
+	if lookup == nil {
+		return nil, false
+	}
+	info, ok := lookup(prRef)
+	return info, ok && info != nil
 }

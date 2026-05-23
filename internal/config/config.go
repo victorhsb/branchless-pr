@@ -175,9 +175,9 @@ func Defaults() *Config {
 	c.Set("repo", "target", "main")
 	c.Set("repo", "reviewer", "")
 	c.Set("repo", "branch_name_template", "$USERNAME/stack")
+	c.Set("submit", "experimental_engine", "false")
 	c.Set("comments", "ignore_authors", "")
 	c.Set("land", "style", "bottom-only")
-	c.Set("submit", "experimental_engine", "false")
 	return c
 }
 
@@ -273,6 +273,10 @@ branch_name_template = $USERNAME/stack
 
 # Default PR reviewers (comma-separated GitHub usernames, or empty)
 reviewer =
+
+[submit]
+# Enable the experimental optimized submit/export engine
+experimental_engine = false
 
 [comments]
 # Comma-separated list of GitHub usernames whose review comments to ignore

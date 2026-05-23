@@ -7,47 +7,55 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
-func TestVerifyWithProviderUsesCachedInfo(t *testing.T) {
-	e := &Entry{Commit: &Header{SHA: "0123456789abcdef0123456789abcdef01234567", Title: "Title"}}
-	e.SetPR("https://github.com/acme/repo/pull/42")
-	e.SetHead("alice/stack/1")
-	e.SetBase("main")
+func TestVerifyWithInfoUsesCachedPRState(t *testing.T) {
+	e := verifyTestEntry("https://github.com/foo/bar/pull/42", "alice/stack/1", "main")
+	lookupCalls := 0
 
-	calls := 0
-	err := VerifyWithProvider(Stack{e}, true, func(prRef string) (*pr.Info, error) {
-		calls++
+	err := VerifyWithInfo(Stack{e}, true, func(prRef string) (*pr.Info, bool) {
+		lookupCalls++
 		return &pr.Info{
 			BaseRefName:      "main",
 			HeadRefName:      "alice/stack/1",
 			Number:           42,
 			State:            "OPEN",
 			MergeStateStatus: "CLEAN",
-		}, nil
+		}, true
 	})
 	if err != nil {
-		t.Fatalf("VerifyWithProvider returned error: %v", err)
+		t.Fatalf("VerifyWithInfo returned error: %v", err)
 	}
-	if calls != 1 {
-		t.Fatalf("provider calls = %d, want 1", calls)
+	if lookupCalls != 1 {
+		t.Fatalf("lookup calls = %d, want 1", lookupCalls)
 	}
 }
 
-func TestVerifyWithProviderPreservesValidationFailures(t *testing.T) {
-	e := &Entry{Commit: &Header{SHA: "0123456789abcdef0123456789abcdef01234567", Title: "Title"}}
-	e.SetPR("https://github.com/acme/repo/pull/42")
-	e.SetHead("alice/stack/1")
-	e.SetBase("main")
+func TestVerifyWithInfoPreservesValidationFailures(t *testing.T) {
+	e := verifyTestEntry("https://github.com/foo/bar/pull/42", "alice/stack/1", "main")
 
-	err := VerifyWithProvider(Stack{e}, true, func(prRef string) (*pr.Info, error) {
+	err := VerifyWithInfo(Stack{e}, true, func(prRef string) (*pr.Info, bool) {
 		return &pr.Info{
-			BaseRefName:      "develop",
+			BaseRefName:      "wrong-base",
 			HeadRefName:      "alice/stack/1",
 			Number:           42,
 			State:            "OPEN",
 			MergeStateStatus: "CLEAN",
-		}, nil
+		}, true
 	})
-	if err == nil || !strings.Contains(err.Error(), "base branch mismatch") {
-		t.Fatalf("error = %v, want base branch mismatch", err)
+	if err == nil {
+		t.Fatalf("expected validation error")
 	}
+	if !strings.Contains(err.Error(), "base branch mismatch") {
+		t.Fatalf("error = %q, want base branch mismatch", err.Error())
+	}
+}
+
+func verifyTestEntry(prURL, head, base string) *Entry {
+	e := &Entry{Commit: &Header{
+		SHA:   "0123456789abcdef0123456789abcdef01234567",
+		Title: "Test commit",
+	}}
+	e.SetPR(prURL)
+	e.SetHead(head)
+	e.SetBase(base)
+	return e
 }

@@ -45,7 +45,9 @@ func View(prRef string) (*Info, error) {
 func ViewByNumber(number int) (*Info, error) {
 	return View(fmt.Sprintf("%d", number))
 }
-func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
+
+// ViewMany queries PR metadata for multiple PR refs.
+func ViewMany(prRefs []string) (map[string]*Info, error) {
 	infos := make(map[string]*Info, len(prRefs))
 	for _, prRef := range prRefs {
 		if prRef == "" {
@@ -58,6 +60,11 @@ func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
 		infos[prRef] = info
 	}
 	return infos, nil
+}
+
+// LoadForSubmit loads the PR metadata submit/export needs for existing PRs.
+func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
+	return ViewMany(prRefs)
 }
 
 // EditBase updates the base branch of a PR.
