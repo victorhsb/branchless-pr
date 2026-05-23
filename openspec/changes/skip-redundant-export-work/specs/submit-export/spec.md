@@ -1,7 +1,38 @@
 ## MODIFIED Requirements
 
+### Requirement: Experimental Submit Engine Gate
+Submit/export SHALL use the current submit/export algorithm by default and SHALL use the optimized submit/export engine only when an experimental feature gate opts in.
+
+#### Scenario: Default submit/export path remains legacy
+
+- **WHEN** `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE` is not set to `1`
+- **AND** `.stack-pr.cfg` does not set `submit.experimental_engine = true`
+- **AND** a user runs `submit` or the `export` alias
+- **THEN** the command SHALL use the current submit/export implementation path
+- **AND** the optimized no-op skip behavior introduced by this change SHALL NOT be required on that invocation
+
+#### Scenario: Experimental submit/export engine enabled by env flag
+
+- **WHEN** `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1`
+- **AND** a user runs `submit` or the `export` alias
+- **THEN** the command SHALL use the optimized submit/export engine
+- **AND** the optimized engine SHALL preserve the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm
+
+#### Scenario: Experimental submit/export engine enabled by config
+
+- **WHEN** `.stack-pr.cfg` sets `submit.experimental_engine = true`
+- **AND** a user runs `submit` or the `export` alias
+- **THEN** the command SHALL use the optimized submit/export engine
+- **AND** the optimized engine SHALL preserve the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm
+
+#### Scenario: Dry-run uses the selected engine
+
+- **WHEN** a user runs `submit --dry-run` or `export --dry-run`
+- **THEN** dry-run planning SHALL use the same submit/export engine selection rule as the corresponding non-dry-run command
+- **AND** dry-run SHALL remain free of local Git mutations, remote pushes, and GitHub PR writes
+
 ### Requirement: Existing PR Safeguard
-Before creating new PRs, submit/export SHALL temporarily protect existing PRs from spurious merge notifications while avoiding redundant GitHub mutations.
+When the experimental submit/export engine is enabled, submit/export SHALL temporarily protect existing PRs from spurious merge notifications while avoiding redundant GitHub mutations before creating new PRs.
 
 #### Scenario: Existing PRs marked temporary draft only when needed
 
@@ -33,7 +64,7 @@ Before creating new PRs, submit/export SHALL temporarily protect existing PRs fr
 - **THEN** the command SHALL set its base branch to the target using `gh pr edit <pr> -B <target>`
 
 ### Requirement: Final Push and Cross-linking
-After metadata is embedded, submit/export SHALL publish changed branch tips and update PR descriptions with cross-links while avoiding no-op pushes and PR edits.
+When the experimental submit/export engine is enabled, submit/export SHALL publish changed branch tips and update PR descriptions with cross-links while avoiding no-op pushes and PR edits after metadata is embedded.
 
 #### Scenario: Second force-push after metadata changes
 

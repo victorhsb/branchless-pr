@@ -12,6 +12,7 @@ The final state is correct, but unchanged stacks still pay multiple network roun
 
 **Goals:**
 
+- Gate the optimized submit/export engine behind an explicit env or repo config opt-in while the implementation is experimental.
 - Reduce repeated `gh` calls during one submit/export run by reusing PR state fetched for the stack.
 - Avoid GitHub write calls when the requested PR state already matches the current state.
 - Avoid the second batch force-push when no metadata amendment changed commit SHAs.
@@ -27,6 +28,14 @@ The final state is correct, but unchanged stacks still pay multiple network roun
 - Do not change command-line flags or user-visible default output except for avoiding progress from skipped no-op operations.
 
 ## Decisions
+
+0. **Gate the optimized submit/export engine with explicit opt-ins.**
+   - The current submit/export path remains the default behavior.
+   - Setting `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1` selects the optimized engine for both `submit` and the `export` alias for that invocation.
+   - Setting `submit.experimental_engine = true` in `.stack-pr.cfg` selects the optimized engine for the repository.
+   - The env flag is useful for one-off trials; the config setting is useful when a repository wants persistent opt-in while the engine is experimental.
+   - Dry-run uses the same engine selection as the corresponding real submit/export invocation so previewed work matches the selected execution path.
+   - Alternative considered: add a CLI flag. Rejected for now because this is an experimental rollout valve, not a user-facing command mode.
 
 1. **Introduce a per-run PR state cache.**
    - Fetch each existing PR's submit-relevant fields at most once for a given phase and reuse the result for draft/base reset, verification, and `--keep-body` content.

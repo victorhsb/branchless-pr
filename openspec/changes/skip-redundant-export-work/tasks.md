@@ -1,3 +1,11 @@
+## 0. Experimental Engine Gate
+
+- [ ] 0.1 Add an env feature gate for the optimized submit/export engine using `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1`.
+- [ ] 0.2 Add `.stack-pr.cfg` support for persistent repo opt-in using `submit.experimental_engine = true`.
+- [ ] 0.3 Keep the existing submit/export implementation as the default path when neither opt-in is enabled.
+- [ ] 0.4 Ensure `submit --dry-run` and the `export` alias use the same engine selection rules as real submit/export.
+- [ ] 0.5 Add tests proving the default path remains legacy and env/config opt-ins select the optimized engine.
+
 ## 1. PR State Reuse
 
 - [ ] 1.1 Add a submit/export PR state model containing the fields needed for draft/base safeguards, verification, keep-body, and final edit comparisons.
