@@ -1,6 +1,6 @@
-# Export Dry Run
+## Purpose
 
-Preview submit/export actions without changing local Git state or GitHub state.
+Define dry-run behavior for previewing submit/export actions without changing local Git state or GitHub state.
 
 ## Requirements
 

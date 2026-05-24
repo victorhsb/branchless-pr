@@ -1,20 +1,34 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Go port of the Python stack-pr CLI (github.com/modular/stack-pr).
+  Binary name: bpr (stack-pr symlink for backward compat).
+  Tech stack: Go 1.25+, Cobra CLI framework, no Go GitHub SDK.
+  All subprocess calls go through internal/shell — never os/exec directly.
+  SPEC.md is the behavioral source of truth; if a port decision contradicts SPEC.md, the spec wins.
+  Config: INI format in .stack-pr.cfg, sections: [common], [repo], [comments], [land].
+  land subcommand is removable via land.style = disable.
+  --dry-run for submit/export: no local Git mutation, no remote push, no PR writes, stash skipped.
+  Branch name template must contain $ID (or implicitly via /$ID).
+  Each commit maps to exactly one PR; stack metadata lives in commit messages.
+  Table-driven tests are the norm. Errors propagate via explicit returns; no panics for control flow.
+  CHANGELOG.md documents user-facing shipped behavior only — no OpenSpec workflow bookkeeping.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+rules:
+  proposal:
+    - Reference SPEC.md sections for any behavioral changes
+    - Identify if change affects the land subcommand (gated by config)
+    - Include a "Port compatibility" section noting divergence from Python stack-pr
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Reference existing SPEC.md sections before inventing new behavior
+    - If behavior differs from Python stack-pr, mark it as an explicit port decision
+  design:
+    - Must not introduce a Go GitHub SDK dependency
+    - Must not bypass internal/shell for subprocess calls
+    - Must respect the package layout: internal/<pkg> is the right granularity
+    - Note which internal/ packages are affected
+  tasks:
+    - Break tasks per internal/<pkg> granularity
+    - Each task must include a test step: go test ./internal/<pkg>
+    - Verify with: make vet && make fmt-check && make test
