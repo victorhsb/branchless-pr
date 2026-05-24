@@ -144,10 +144,8 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 }
 
 func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions) error {
-	for _, e := range st {
-		if err := git.Checkout(e.Commit.SHA, e.Head()); err != nil {
-			return err
-		}
+	if err := initializeStackBranches(st); err != nil {
+		return err
 	}
 
 	needsBranchRebase := false
@@ -248,10 +246,8 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 }
 
 func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions) error {
-	for _, e := range st {
-		if err := git.Checkout(e.Commit.SHA, e.Head()); err != nil {
-			return err
-		}
+	if err := initializeStackBranches(st); err != nil {
+		return err
 	}
 
 	needsBranchRebase := false
@@ -375,6 +371,15 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		printSubmitTips(st)
 	}
 
+	return nil
+}
+
+func initializeStackBranches(st stack.Stack) error {
+	for _, e := range st {
+		if err := git.ForceUpdateBranch(e.Head(), e.Commit.SHA); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

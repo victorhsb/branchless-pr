@@ -286,7 +286,77 @@ func TestAmendCommitMetadataChangedReportsNoMetadataChanges(t *testing.T) {
 	}
 }
 
+func TestInitializeStackBranchesUsesBranchRefUpdates(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake git is Unix-only")
+	}
+	logPath := installFakeGitLogger(t)
+	st := stack.Stack{
+		entryForSubmitTest("1111111111111111111111111111111111111111", "alice/stack/1", "main", "First"),
+		entryForSubmitTest("2222222222222222222222222222222222222222", "alice/stack/2", "alice/stack/1", "Second"),
+	}
+
+	if err := initializeStackBranches(st); err != nil {
+		t.Fatalf("initializeStackBranches returned error: %v", err)
+	}
+	log := readTestFile(t, logPath)
+	mustContain(t, log, "branch -f alice/stack/1 1111111111111111111111111111111111111111")
+	mustContain(t, log, "branch -f alice/stack/2 2222222222222222222222222222222222222222")
+	if strings.Contains(log, "checkout") {
+		t.Fatalf("branch initialization used checkout:\n%s", log)
+	}
+}
+
+func TestAmendCommitMetadataStillChecksOutAndRebases(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake git is Unix-only")
+	}
+	logPath := installFakeGitLogger(t)
+	st := stack.Stack{
+		entryForSubmitTest("1111111111111111111111111111111111111111", "alice/stack/1", "main", "First"),
+		entryForSubmitTest("2222222222222222222222222222222222222222", "alice/stack/2", "alice/stack/1", "Second"),
+	}
+	for _, e := range st {
+		e.SetPR("https://github.com/acme/repo/pull/1")
+	}
+
+	changed, err := amendCommitMetadataChanged(st, []bool{true, true})
+	if err != nil {
+		t.Fatalf("amendCommitMetadataChanged returned error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("changed = false, want true")
+	}
+	log := readTestFile(t, logPath)
+	mustContain(t, log, "checkout alice/stack/1")
+	mustContain(t, log, "commit --amend -F -")
+	mustContain(t, log, "rebase --committer-date-is-author-date alice/stack/1 alice/stack/2")
+}
+
 // --- helpers ---
+
+func entryForSubmitTest(sha, head, base, title string) *stack.Entry {
+	e := &stack.Entry{Commit: &stack.Header{SHA: sha, Title: title}}
+	e.SetHead(head)
+	e.SetBase(base)
+	return e
+}
+
+func installFakeGitLogger(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "git.log")
+	gitPath := filepath.Join(binDir, "git")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GIT_LOG"
+`
+	if err := os.WriteFile(gitPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("GIT_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
 
 func installFakeGHLogger(t *testing.T) string {
 	t.Helper()

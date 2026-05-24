@@ -500,7 +500,7 @@ Detailed behavior:
 7. Initialize local branches:
    - Fetch/prune remote.
    - Assign generated head branches to entries missing metadata heads.
-   - For each entry, run `git checkout <commit-id> -B <entry.head>`.
+   - For each entry, create or reset the local branch `<entry.head>` so it points at `<commit-id>` without requiring a worktree checkout for each stack entry.
 8. Compute base branches.
 9. Determine whether the original current branch needs rebasing: true if the top stack branch is an ancestor of the current branch.
 10. Reset remote base branches for existing PRs:

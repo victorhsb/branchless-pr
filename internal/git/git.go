@@ -271,6 +271,18 @@ func Checkout(startPoint, branch string) error {
 	return nil
 }
 
+// ForceUpdateBranch creates or resets branch from startPoint without switching the worktree.
+func ForceUpdateBranch(branch, startPoint string) error {
+	_, _, err := shell.Run(
+		[]string{"git", "branch", "-f", branch, startPoint},
+		shell.RunOpts{},
+	)
+	if err != nil {
+		return &Error{Op: "force_update_branch", Err: err}
+	}
+	return nil
+}
+
 // CheckoutBranch switches to branch without -B (used for post-op restore).
 func CheckoutBranch(branch string) error {
 	_, _, err := shell.Run(

@@ -1,9 +1,12 @@
 package git
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 func TestIsFullSHA(t *testing.T) {
@@ -115,5 +118,107 @@ func TestIsRebaseInProgressDetectsRebaseApply(t *testing.T) {
 
 	if !IsRebaseInProgress(dir) {
 		t.Fatalf("expected rebase-in-progress to be detected when .git/rebase-apply exists")
+	}
+}
+
+func TestForceUpdateBranchCreatesMissingBranch(t *testing.T) {
+	repo := initTestRepo(t)
+	sha := commitTestFile(t, repo, "one.txt", "one")
+	withWorkingDir(t, repo)
+
+	if err := ForceUpdateBranch("stack/one", sha); err != nil {
+		t.Fatalf("ForceUpdateBranch returned error: %v", err)
+	}
+	got, err := RevParse("stack/one")
+	if err != nil {
+		t.Fatalf("RevParse returned error: %v", err)
+	}
+	if got != sha {
+		t.Fatalf("stack/one = %s, want %s", got, sha)
+	}
+	if branch, err := CurrentBranchName(); err != nil || branch != "main" {
+		t.Fatalf("current branch = %q, %v; want main", branch, err)
+	}
+}
+
+func TestForceUpdateBranchResetsExistingBranch(t *testing.T) {
+	repo := initTestRepo(t)
+	oldSHA := commitTestFile(t, repo, "one.txt", "one")
+	newSHA := commitTestFile(t, repo, "two.txt", "two")
+	withWorkingDir(t, repo)
+
+	if err := ForceUpdateBranch("stack/one", newSHA); err != nil {
+		t.Fatalf("ForceUpdateBranch create returned error: %v", err)
+	}
+	if err := ForceUpdateBranch("stack/one", oldSHA); err != nil {
+		t.Fatalf("ForceUpdateBranch reset returned error: %v", err)
+	}
+	got, err := RevParse("stack/one")
+	if err != nil {
+		t.Fatalf("RevParse returned error: %v", err)
+	}
+	if got != oldSHA {
+		t.Fatalf("stack/one = %s, want %s", got, oldSHA)
+	}
+}
+
+func TestForceUpdateBranchWrapsErrors(t *testing.T) {
+	repo := initTestRepo(t)
+	commitTestFile(t, repo, "one.txt", "one")
+	withWorkingDir(t, repo)
+
+	err := ForceUpdateBranch("bad branch", "HEAD")
+	if err == nil {
+		t.Fatalf("ForceUpdateBranch returned nil error")
+	}
+	var gitErr *Error
+	if !errors.As(err, &gitErr) {
+		t.Fatalf("error type = %T, want *git.Error", err)
+	}
+	if gitErr.Op != "force_update_branch" {
+		t.Fatalf("git error op = %q, want force_update_branch", gitErr.Op)
+	}
+}
+
+func initTestRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGitForTest(t, repo, "init", "-b", "main")
+	runGitForTest(t, repo, "config", "user.name", "Test User")
+	runGitForTest(t, repo, "config", "user.email", "test@example.com")
+	return repo
+}
+
+func commitTestFile(t *testing.T, repo, name, contents string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(contents), 0o644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	runGitForTest(t, repo, "add", name)
+	runGitForTest(t, repo, "commit", "-m", contents)
+	out, err := shell.Output([]string{"git", "rev-parse", "HEAD"}, shell.RunOpts{Dir: repo})
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return out
+}
+
+func runGitForTest(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmd := append([]string{"git"}, args...)
+	if _, err := shell.Output(cmd, shell.RunOpts{Dir: repo}); err != nil {
+		t.Fatalf("%v: %v", cmd, err)
+	}
+}
+
+func withWorkingDir(t *testing.T, dir string) {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir %s: %v", dir, err)
 	}
 }
