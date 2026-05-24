@@ -72,12 +72,24 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 		return nil
 	}
 
+	experimentalEngine := useExperimentalSubmitEngine(app)
 	if opts.DryRun {
 		printDryRunPlan(st, needsMeta, isDraft)
 		return nil
 	}
 
+	if experimentalEngine {
+		return applyMutationsOptimized(app, st, needsMeta, isDraft, opts)
+	}
 	return applyMutations(app, st, needsMeta, isDraft, opts)
+}
+
+func useExperimentalSubmitEngine(app *AppContext) bool {
+	if os.Getenv("STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE") == "1" {
+		return true
+	}
+	enabled, err := app.Config.GetBool("submit", "experimental_engine")
+	return err == nil && enabled
 }
 
 func validateSubmitPreconditions(app *AppContext, opts submitOptions) error {
@@ -235,6 +247,137 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	return nil
 }
 
+func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions) error {
+	for _, e := range st {
+		if err := git.Checkout(e.Commit.SHA, e.Head()); err != nil {
+			return err
+		}
+	}
+
+	needsBranchRebase := false
+	if top := st.Top(); top != nil {
+		needsBranchRebase, _ = git.IsAncestor(top.Head(), app.OrigBranch)
+	}
+
+	cache, err := newSubmitPRStateCache(st)
+	if err != nil {
+		return fmt.Errorf("ERROR: Cannot fetch PR state: %w", err)
+	}
+	tmpDraftPRs, err := tempDraftAndResetBasesOptimized(st, app.Args.Target, cache)
+	if err != nil {
+		return err
+	}
+
+	heads := make([]string, len(st))
+	for i, e := range st {
+		heads[i] = e.Head()
+	}
+	if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+		return fmt.Errorf("ERROR: Cannot push branches: %w", err)
+	}
+
+	for i, e := range st {
+		if e.HasPR() {
+			continue
+		}
+		body := stack.BuildPRBody(e, st, false, "")
+		prOpts := pr.CreateOptions{
+			Base:     e.Base(),
+			Head:     e.Head(),
+			Title:    e.Commit.Title,
+			Body:     body,
+			Reviewer: opts.Reviewer,
+			Draft:    isDraft[i],
+		}
+		prURL, err := pr.Create(prOpts)
+		if err != nil {
+			return fmt.Errorf("ERROR: Cannot create a PR: %w", err)
+		}
+		e.SetPR(prURL)
+		prNum, _ := e.PRNumber()
+		cache.set(prURL, &pr.Info{
+			BaseRefName: e.Base(),
+			HeadRefName: e.Head(),
+			Number:      prNum,
+			State:       "OPEN",
+			Body:        string(body),
+			Title:       e.Commit.Title,
+			URL:         prURL,
+			IsDraft:     isDraft[i],
+		})
+	}
+
+	if err := stack.VerifyWithProvider(st, false, cache.get); err != nil {
+		return err
+	}
+
+	fmt.Println("Stack:")
+	st.PrintStack(app.Args.Hyperlinks, true)
+	fmt.Println()
+
+	changedTips, err := amendCommitMetadataChanged(st, needsMeta)
+	if err != nil {
+		return err
+	}
+	if changedTips {
+		if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+			return fmt.Errorf("ERROR: Cannot push amended branches: %w", err)
+		}
+	}
+
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		existingBody := ""
+		if opts.KeepBody {
+			info, err := cache.get(e.PR())
+			if err != nil {
+				return fmt.Errorf("ERROR: Cannot fetch PR body: %w", err)
+			}
+			existingBody = info.Body
+		}
+		body := stack.BuildPRBody(e, st, opts.KeepBody, existingBody)
+		info, err := cache.get(e.PR())
+		if err != nil {
+			return fmt.Errorf("ERROR: Cannot fetch PR state: %w", err)
+		}
+		if !submitPREditNeeded(info, e.Commit.Title, e.Base(), body) {
+			continue
+		}
+		if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
+			return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+		}
+		cache.updateEdit(e.PR(), e.Commit.Title, e.Base(), string(body))
+	}
+
+	for _, prRef := range tmpDraftPRs {
+		if err := pr.Ready(prRef); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to mark PR %s ready: %v\n", prRef, err)
+			continue
+		}
+		cache.updateDraft(prRef, false)
+	}
+
+	if needsBranchRebase {
+		if err := git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
+			return fmt.Errorf("ERROR: Cannot rebase original branch: %w", err)
+		}
+	} else {
+		if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+			return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
+		}
+	}
+
+	git.DeleteLocalBranches(heads...)
+
+	if app.Args.ShowTips {
+		printSubmitTips(st)
+	}
+
+	return nil
+}
+
 func tempDraftAndResetBases(st stack.Stack, target string) ([]string, error) {
 	var tmpDraftPRs []string
 	for _, e := range st {
@@ -259,31 +402,123 @@ func tempDraftAndResetBases(st stack.Stack, target string) ([]string, error) {
 	return tmpDraftPRs, nil
 }
 
+func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submitPRStateCache) ([]string, error) {
+	var tmpDraftPRs []string
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		info, err := cache.get(e.PR())
+		if err != nil {
+			return nil, fmt.Errorf("ERROR: Cannot verify stack: %w", err)
+		}
+		if !info.IsDraft {
+			if err := pr.ReadyUndo(e.PR()); err != nil {
+				return nil, fmt.Errorf("ERROR: Cannot update PR draft state: %w", err)
+			}
+			e.IsTmpDraft = true
+			tmpDraftPRs = append(tmpDraftPRs, e.PR())
+			cache.updateDraft(e.PR(), true)
+		}
+		if info.BaseRefName != target {
+			if err := pr.EditBase(e.PR(), target); err != nil {
+				return nil, fmt.Errorf("ERROR: Cannot reset PR base: %w", err)
+			}
+			cache.updateBase(e.PR(), target)
+		}
+	}
+	return tmpDraftPRs, nil
+}
+
+func submitPREditNeeded(info *pr.Info, title, base string, body []byte) bool {
+	return info.Title != title || info.Body != string(body) || info.BaseRefName != base
+}
+
 func amendCommitMetadata(st stack.Stack, needsMeta []bool) error {
+	_, err := amendCommitMetadataChanged(st, needsMeta)
+	return err
+}
+
+func amendCommitMetadataChanged(st stack.Stack, needsMeta []bool) (bool, error) {
 	metaModified := false
 	for i, e := range st {
 		if needsMeta[i] {
 			if !metaModified {
 				if err := git.CheckoutBranch(e.Head()); err != nil {
-					return err
+					return false, err
 				}
 			} else {
 				if err := git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
-					return err
+					return false, err
 				}
 			}
 			msg := []byte(e.Commit.CommitMsg() + e.MetadataLine())
 			if err := git.CommitAmend(msg); err != nil {
-				return fmt.Errorf("ERROR: Cannot update stack metadata: %w", err)
+				return false, fmt.Errorf("ERROR: Cannot update stack metadata: %w", err)
 			}
 			metaModified = true
 		} else if metaModified {
 			if err := git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
-				return err
+				return false, err
 			}
 		}
 	}
-	return nil
+	return metaModified, nil
+}
+
+type submitPRStateCache struct {
+	infos map[string]*pr.Info
+}
+
+func newSubmitPRStateCache(st stack.Stack) (*submitPRStateCache, error) {
+	refs := make([]string, 0, len(st))
+	for _, e := range st {
+		if e.HasPR() {
+			refs = append(refs, e.PR())
+		}
+	}
+	infos, err := pr.LoadForSubmit(refs)
+	if err != nil {
+		return nil, err
+	}
+	return &submitPRStateCache{infos: infos}, nil
+}
+
+func (c *submitPRStateCache) get(prRef string) (*pr.Info, error) {
+	info, ok := c.infos[prRef]
+	if !ok {
+		info, err := pr.View(prRef)
+		if err != nil {
+			return nil, err
+		}
+		c.infos[prRef] = info
+		return info, nil
+	}
+	return info, nil
+}
+
+func (c *submitPRStateCache) set(prRef string, info *pr.Info) {
+	c.infos[prRef] = info
+}
+
+func (c *submitPRStateCache) updateDraft(prRef string, isDraft bool) {
+	if info, ok := c.infos[prRef]; ok {
+		info.IsDraft = isDraft
+	}
+}
+
+func (c *submitPRStateCache) updateBase(prRef, base string) {
+	if info, ok := c.infos[prRef]; ok {
+		info.BaseRefName = base
+	}
+}
+
+func (c *submitPRStateCache) updateEdit(prRef, title, base, body string) {
+	if info, ok := c.infos[prRef]; ok {
+		info.Title = title
+		info.BaseRefName = base
+		info.Body = body
+	}
 }
 
 func printSubmitTips(st stack.Stack) {

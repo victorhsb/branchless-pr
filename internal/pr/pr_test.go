@@ -38,6 +38,39 @@ printf 'https://github.com/acme/repo/pull/123\n'
 	}
 }
 
+func TestLoadForSubmitFetchesEachPR(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "gh.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_LOG"
+printf '{"baseRefName":"main","headRefName":"alice/stack/1","number":42,"state":"OPEN","body":"body","title":"Title","url":"https://github.com/acme/repo/pull/42","mergeStateStatus":"CLEAN","isDraft":false}\n'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GH_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	infos, err := LoadForSubmit([]string{"1", "2"})
+	if err != nil {
+		t.Fatalf("LoadForSubmit returned error: %v", err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("infos len = %d, want 2", len(infos))
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if got := strings.Count(string(log), "pr view"); got != 2 {
+		t.Fatalf("pr view calls = %d, want 2; log=%s", got, log)
+	}
+}
+
 func TestParseCreateOutputFindsLastPullURL(t *testing.T) {
 	out := []byte("Creating pull request\nhttps://github.com/acme/repo/pull/122\n✓ Created https://github.com/acme/repo/pull/123\nLearn more at https://docs.github.com/\n")
 	got, err := parseCreateOutput(out)

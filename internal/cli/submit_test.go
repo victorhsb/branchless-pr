@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/victorhsb/branchless-pr/internal/config"
+	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
@@ -160,7 +164,157 @@ func TestDryRunNoChangesNoteWording(t *testing.T) {
 	}
 }
 
+func TestUseExperimentalSubmitEngineSelection(t *testing.T) {
+	t.Setenv("STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE", "")
+	app := &AppContext{Config: config.Defaults()}
+	if useExperimentalSubmitEngine(app) {
+		t.Fatalf("default engine selection = experimental, want legacy")
+	}
+
+	t.Setenv("STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE", "1")
+	if !useExperimentalSubmitEngine(app) {
+		t.Fatalf("env opt-in did not select experimental engine")
+	}
+
+	t.Setenv("STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE", "")
+	cfg := config.Defaults()
+	cfg.Set("submit", "experimental_engine", "true")
+	app.Config = cfg
+	if !useExperimentalSubmitEngine(app) {
+		t.Fatalf("config opt-in did not select experimental engine")
+	}
+}
+
+func TestTempDraftAndResetBasesOptimizedSkipsNoOps(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	logPath := installFakeGHLogger(t)
+
+	e := &stack.Entry{}
+	e.SetPR("https://github.com/acme/repo/pull/1")
+	cache := &submitPRStateCache{infos: map[string]*pr.Info{
+		e.PR(): {BaseRefName: "main", IsDraft: true},
+	}}
+
+	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache)
+	if err != nil {
+		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
+	}
+	if len(tmp) != 0 {
+		t.Fatalf("tmp draft PRs = %v, want none", tmp)
+	}
+	if got := readTestFile(t, logPath); got != "" {
+		t.Fatalf("gh commands = %q, want none", got)
+	}
+}
+
+func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	logPath := installFakeGHLogger(t)
+
+	e := &stack.Entry{}
+	e.SetPR("https://github.com/acme/repo/pull/2")
+	cache := &submitPRStateCache{infos: map[string]*pr.Info{
+		e.PR(): {BaseRefName: "feature", IsDraft: false},
+	}}
+
+	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache)
+	if err != nil {
+		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
+	}
+	if len(tmp) != 1 || tmp[0] != e.PR() {
+		t.Fatalf("tmp draft PRs = %v, want %s", tmp, e.PR())
+	}
+	if !e.IsTmpDraft {
+		t.Fatalf("entry was not marked temporary draft")
+	}
+	info := cache.infos[e.PR()]
+	if !info.IsDraft || info.BaseRefName != "main" {
+		t.Fatalf("cached info = %+v, want draft with base main", info)
+	}
+	log := readTestFile(t, logPath)
+	mustContain(t, log, "pr ready https://github.com/acme/repo/pull/2 --undo")
+	mustContain(t, log, "pr edit https://github.com/acme/repo/pull/2 -B main")
+}
+
+func TestSubmitPREditNeededComparesTitleBodyAndBase(t *testing.T) {
+	info := &pr.Info{Title: "Title", Body: "body", BaseRefName: "main"}
+	if submitPREditNeeded(info, "Title", "main", []byte("body")) {
+		t.Fatalf("unchanged title/body/base should not need edit")
+	}
+	for _, tt := range []struct {
+		name  string
+		title string
+		base  string
+		body  []byte
+	}{
+		{"title", "New", "main", []byte("body")},
+		{"base", "Title", "develop", []byte("body")},
+		{"body", "Title", "main", []byte("new body")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if !submitPREditNeeded(info, tt.title, tt.base, tt.body) {
+				t.Fatalf("changed %s should need edit", tt.name)
+			}
+		})
+	}
+}
+
+func TestSubmitPRStateCacheReusesCachedBody(t *testing.T) {
+	cache := &submitPRStateCache{infos: map[string]*pr.Info{
+		"https://github.com/acme/repo/pull/3": {Body: "existing body"},
+	}}
+	info, err := cache.get("https://github.com/acme/repo/pull/3")
+	if err != nil {
+		t.Fatalf("cache.get returned error: %v", err)
+	}
+	if info.Body != "existing body" {
+		t.Fatalf("body = %q, want cached body", info.Body)
+	}
+}
+
+func TestAmendCommitMetadataChangedReportsNoMetadataChanges(t *testing.T) {
+	changed, err := amendCommitMetadataChanged(stack.Stack{&stack.Entry{}}, []bool{false})
+	if err != nil {
+		t.Fatalf("amendCommitMetadataChanged returned error: %v", err)
+	}
+	if changed {
+		t.Fatalf("changed = true, want false")
+	}
+}
+
 // --- helpers ---
+
+func installFakeGHLogger(t *testing.T) string {
+	t.Helper()
+	binDir := t.TempDir()
+	logPath := filepath.Join(binDir, "gh.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_LOG"
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GH_LOG", logPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return logPath
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(b)
+}
 
 func mustContain(t *testing.T, haystack, needle string) {
 	t.Helper()

@@ -177,6 +177,7 @@ func Defaults() *Config {
 	c.Set("repo", "branch_name_template", "$USERNAME/stack")
 	c.Set("comments", "ignore_authors", "")
 	c.Set("land", "style", "bottom-only")
+	c.Set("submit", "experimental_engine", "false")
 	return c
 }
 
@@ -276,6 +277,10 @@ reviewer =
 [comments]
 # Comma-separated list of GitHub usernames whose review comments to ignore
 ignore_authors =
+
+[submit]
+# Enable the experimental submit/export engine that skips redundant work
+experimental_engine = false
 
 [land]
 # Landing style: "bottom-only" merges only the bottom PR, "all" merges the whole stack.

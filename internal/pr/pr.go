@@ -40,6 +40,22 @@ func View(prRef string) (*Info, error) {
 	return &info, nil
 }
 
+// LoadForSubmit fetches the PR state submit/export needs for existing PRs.
+func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
+	infos := make(map[string]*Info, len(prRefs))
+	for _, prRef := range prRefs {
+		if prRef == "" {
+			continue
+		}
+		info, err := View(prRef)
+		if err != nil {
+			return nil, err
+		}
+		infos[prRef] = info
+	}
+	return infos, nil
+}
+
 // EditBase updates the base branch of a PR.
 func EditBase(prRef, base string) error {
 	args := []string{"gh", "pr", "edit", prRef, "-B", base}
