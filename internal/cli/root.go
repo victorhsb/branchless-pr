@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/invocation"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
@@ -72,7 +73,8 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if commandInSubtree(cmd, "agent") {
+			policy := invocation.PolicyFor(cmd.Name(), commandInSubtree(cmd, "agent"), commandInSubtree(cmd, "config"))
+			if policy.AgentOnly {
 				cmd.SetContext(newContextFromApp(&AppContext{Config: cfg}))
 				return nil
 			}
@@ -155,15 +157,14 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 				OrigBranch: origBranch,
 			}
 
-			// --- Steps below are skipped for config command subtree ---
-			if commandInSubtree(cmd, "config") {
+			if policy.ConfigOnly {
 				cmd.SetContext(newContextFromApp(appCtx))
 				return nil
 			}
 
 			// Stash (submit/export only, before clean check). Skipped in dry-run
 			// mode because stash save/pop mutates local Git state.
-			if (cmd.Name() == "submit" || cmd.Name() == "export") && flagStash {
+			if policy.UsesStash && flagStash {
 				dryRun, _ := cmd.Flags().GetBool("dry-run")
 				if !dryRun {
 					stashed, err := git.StashSave("stack-pr auto-stash")
@@ -175,24 +176,26 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			}
 
 			// Require clean repo (all except read-only inspection/config commands)
-			if cmd.Name() != "view" && cmd.Name() != "comments" && cmd.Name() != "checks" && !commandInSubtree(cmd, "config") {
+			if !policy.AllowsDirty {
 				if err := RequireCleanRepo(); err != nil {
 					return err
 				}
 			}
 
 			// Check that REMOTE/TARGET exists
-			if err := git.TargetExists(ca.Remote, ca.Target); err != nil {
-				if ca.Target == "main" {
-					if e := git.TargetExists(ca.Remote, "master"); e == nil {
-						fmt.Fprintln(os.Stderr, "Hint: target branch 'main' not found, but 'master' exists on remote. Use --target master if applicable.")
+			if policy.RequiresTarget {
+				if err := git.TargetExists(ca.Remote, ca.Target); err != nil {
+					if ca.Target == "main" {
+						if e := git.TargetExists(ca.Remote, "master"); e == nil {
+							fmt.Fprintln(os.Stderr, "Hint: target branch 'main' not found, but 'master' exists on remote. Use --target master if applicable.")
+						}
 					}
+					return err
 				}
-				return err
 			}
 
 			// Deduce base if missing
-			if ca.Base == "" {
+			if policy.RequiresTarget && ca.Base == "" {
 				mb, err := git.MergeBase(ca.Head, ca.Remote+"/"+ca.Target)
 				if err != nil {
 					return fmt.Errorf("unable to deduce base merge-base: %w", err)

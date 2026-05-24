@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -142,11 +141,4 @@ func landImpl(app *AppContext) error {
 	}
 
 	return nil
-}
-
-var stackInfoLine = regexp.MustCompile(`(?m)^stack-info: PR: .+, branch: .+\n?`)
-
-// stripStackInfo removes the stack-info metadata line(s) from a commit body.
-func stripStackInfo(body string) string {
-	return stackInfoLine.ReplaceAllString(body, "")
 }
