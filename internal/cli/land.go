@@ -11,21 +11,45 @@ import (
 )
 
 func landCmd() *cobra.Command {
-	return &cobra.Command{
+	var wholeStackFlag bool
+	cmd := &cobra.Command{
 		Use:   "land",
 		Short: "Land the bottom-most PR in the stack.",
-		Long:  `Squash-merges the bottom PR and rebases the rest of the stack.`,
+		Long: `Land stacked PRs into the target branch.
+
+The default "bottom-only" style squash-merges the bottom PR and rebases the
+rest of the stack. The "whole-stack" style (set via land.style or the
+--whole-stack flag) retargets the tip PR to the target branch and performs a
+GitHub rebase merge so the entire stack lands in a single operation.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, ok := FromContext(cmd.Context())
 			if !ok {
 				return fmt.Errorf("missing app context")
 			}
-			return WithRecovery(app, func() error { return landImpl(app) })
+			style := effectiveLandStyle(app, wholeStackFlag)
+			return WithRecovery(app, func() error { return landImpl(app, style) })
 		},
+	}
+	cmd.Flags().BoolVar(&wholeStackFlag, "whole-stack", false, "Land the entire stack via rebase-merge of the tip PR (overrides land.style)")
+	return cmd
+}
+
+// effectiveLandStyle resolves the active land style for a single invocation.
+// The --whole-stack flag wins; otherwise the configured land.style is used,
+// defaulting to bottom-only when unset or unrecognised.
+func effectiveLandStyle(app *AppContext, wholeStackFlag bool) string {
+	if wholeStackFlag {
+		return "whole-stack"
+	}
+	switch app.Config.Get("land", "style") {
+	case "whole-stack":
+		return "whole-stack"
+	default:
+		return "bottom-only"
 	}
 }
 
-func landImpl(app *AppContext) error {
+func landImpl(app *AppContext, style string) error {
 	// 3. Optionally fast-forward local base.
 	if err := maybeRebaseBase(app); err != nil {
 		return err
@@ -57,7 +81,14 @@ func landImpl(app *AppContext) error {
 		return err
 	}
 
-	// 8. Land the bottom-most PR.
+	// 8. Dispatch to the selected landing strategy.
+	if style == "whole-stack" {
+		return landWholeStack(app, st)
+	}
+	return landBottomOnly(app, st)
+}
+
+func landBottomOnly(app *AppContext, st stack.Stack) error {
 	bottom := st.Bottom()
 	if err := git.Fetch(app.Args.Remote); err != nil {
 		return err
@@ -116,29 +147,69 @@ func landImpl(app *AppContext) error {
 		}
 	}
 
-	// 10. Checkout original branch.
+	// 10-13. Cleanup: restore original branch, delete locals, rebase target+orig.
+	return landCleanup(app, st)
+}
+
+// landWholeStack lands every PR in the stack atomically by retargeting the
+// tip PR to the target branch and performing a GitHub rebase merge.
+// Pre-flight steps 1-7 in landImpl have already discovered/verified the stack.
+var landWholeStack = landWholeStackImpl
+
+func landWholeStackImpl(app *AppContext, st stack.Stack) error {
+	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	if err != nil {
+		return fmt.Errorf("ERROR: Cannot resolve owner/repo from remote %q: %w", app.Args.Remote, err)
+	}
+	allowed, err := pr.RebaseMergeAllowed(owner, repo)
+	if err != nil {
+		return fmt.Errorf("ERROR: Cannot query repository merge settings: %w", err)
+	}
+	if !allowed {
+		return fmt.Errorf("ERROR: Repository %s/%s does not allow rebase merges. Enable rebase merges in repository settings or use land.style = bottom-only.", owner, repo)
+	}
+
+	if err := git.Fetch(app.Args.Remote); err != nil {
+		return err
+	}
+
+	tip := st.Top()
+	if err := pr.EditBase(tip.PR(), app.Args.Target); err != nil {
+		return fmt.Errorf("ERROR: Cannot set base on tip PR: %w", err)
+	}
+	if err := pr.MergeRebase(tip.PR()); err != nil {
+		return fmt.Errorf("ERROR: Cannot rebase-merge tip PR: %w", err)
+	}
+
+	if err := git.Fetch(app.Args.Remote); err != nil {
+		return err
+	}
+
+	return landCleanup(app, st)
+}
+
+// landCleanup restores the original branch, deletes local stack branches, and
+// rebases the local target plus original branch onto REMOTE/TARGET. Shared
+// between bottom-only and whole-stack landing.
+func landCleanup(app *AppContext, st stack.Stack) error {
 	if err := git.CheckoutBranch(app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 	}
 
-	// 11. Delete local stack branches.
 	heads := make([]string, 0, len(st))
 	for _, e := range st {
 		heads = append(heads, e.Head())
 	}
 	git.DeleteLocalBranches(heads...)
 
-	// 12. If a local target branch exists, rebase it onto REMOTE/TARGET.
+	remoteTarget := app.Args.Remote + "/" + app.Args.Target
 	if exists, _ := git.BranchExists(app.Args.Target); exists {
-		if err := git.Rebase(app.Args.Remote+"/"+app.Args.Target, app.Args.Target); err != nil {
+		if err := git.Rebase(remoteTarget, app.Args.Target); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase local target %q: %w", app.Args.Target, err)
 		}
 	}
-
-	// 13. Rebase the original branch onto REMOTE/TARGET.
-	if err := git.Rebase(app.Args.Remote+"/"+app.Args.Target, app.OrigBranch); err != nil {
+	if err := git.Rebase(remoteTarget, app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot rebase original branch %q: %w", app.OrigBranch, err)
 	}
-
 	return nil
 }

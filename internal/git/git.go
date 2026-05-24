@@ -404,6 +404,65 @@ func CommitAmend(msg []byte) error {
 	return nil
 }
 
+// RepoSlug returns the (owner, repo) pair for the named remote by parsing the
+// URL reported by `git remote get-url <remote>`. It accepts both HTTPS
+// (`https://github.com/owner/repo[.git]`) and SSH (`git@github.com:owner/repo[.git]`)
+// forms.
+func RepoSlug(remote string) (owner, repo string, err error) {
+	if remote == "" {
+		return "", "", fmt.Errorf("remote name is empty")
+	}
+	url, err := shell.Output([]string{"git", "remote", "get-url", remote}, shell.RunOpts{Quiet: true})
+	if err != nil {
+		return "", "", &Error{Op: "repo_slug", Err: err}
+	}
+	return parseRepoSlug(url)
+}
+
+func parseRepoSlug(url string) (owner, repo string, err error) {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return "", "", fmt.Errorf("empty remote url")
+	}
+	var path string
+	switch {
+	case strings.HasPrefix(url, "git@"):
+		// git@github.com:owner/repo.git
+		_, p, ok := strings.Cut(url, ":")
+		if !ok {
+			return "", "", fmt.Errorf("invalid ssh remote url: %q", url)
+		}
+		path = p
+	case strings.HasPrefix(url, "ssh://"):
+		// ssh://git@github.com/owner/repo.git
+		rest := strings.TrimPrefix(url, "ssh://")
+		_, p, ok := strings.Cut(rest, "/")
+		if !ok {
+			return "", "", fmt.Errorf("invalid ssh remote url: %q", url)
+		}
+		path = p
+	case strings.HasPrefix(url, "https://"), strings.HasPrefix(url, "http://"):
+		// https://github.com/owner/repo[.git]
+		rest := url
+		rest = strings.TrimPrefix(rest, "https://")
+		rest = strings.TrimPrefix(rest, "http://")
+		_, p, ok := strings.Cut(rest, "/")
+		if !ok {
+			return "", "", fmt.Errorf("invalid https remote url: %q", url)
+		}
+		path = p
+	default:
+		return "", "", fmt.Errorf("unsupported remote url scheme: %q", url)
+	}
+	path = strings.TrimSuffix(path, ".git")
+	path = strings.TrimSuffix(path, "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("cannot parse owner/repo from remote url: %q", url)
+	}
+	return parts[0], parts[1], nil
+}
+
 // TargetExists returns nil if remote/target is a valid ref.
 func TargetExists(remote, target string) error {
 	ref := remote + "/" + target

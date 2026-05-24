@@ -163,3 +163,62 @@ func MergeSquash(prRef, title string, body []byte) error {
 	}
 	return nil
 }
+
+// MergeRebase performs a rebase merge on a PR via `gh pr merge --rebase`.
+// Commits land linearly on the PR's base branch, preserving their original
+// commit messages.
+func MergeRebase(prRef string) error {
+	args := []string{"gh", "pr", "merge", prRef, "--rebase"}
+	_, _, err := shell.Run(args, shell.RunOpts{})
+	if err != nil {
+		return fmt.Errorf("gh pr merge --rebase %s: %w", prRef, err)
+	}
+	return nil
+}
+
+// RebaseMergeAllowed queries the repository's merge settings via the GitHub
+// GraphQL API and reports whether rebase merges are enabled. Returns
+// (false, err) on any API/network failure so the caller can surface the
+// underlying error rather than silently falling back.
+func RebaseMergeAllowed(owner, repo string) (bool, error) {
+	return rebaseMergeAllowedWith(owner, repo, ghAPIGraphQL)
+}
+
+type graphqlRunner func(query string, fields map[string]string) ([]byte, error)
+
+func rebaseMergeAllowedWith(owner, repo string, run graphqlRunner) (bool, error) {
+	const query = `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { rebaseMergeAllowed } }`
+	out, err := run(query, map[string]string{"owner": owner, "repo": repo})
+	if err != nil {
+		return false, fmt.Errorf("query rebaseMergeAllowed: %w", err)
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				RebaseMergeAllowed bool `json:"rebaseMergeAllowed"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return false, fmt.Errorf("parse rebaseMergeAllowed response: %w", err)
+	}
+	if len(resp.Errors) > 0 {
+		return false, fmt.Errorf("rebaseMergeAllowed graphql error: %s", resp.Errors[0].Message)
+	}
+	return resp.Data.Repository.RebaseMergeAllowed, nil
+}
+
+func ghAPIGraphQL(query string, fields map[string]string) ([]byte, error) {
+	args := []string{"gh", "api", "graphql", "-f", "query=" + query}
+	for k, v := range fields {
+		args = append(args, "-f", fmt.Sprintf("%s=%s", k, v))
+	}
+	out, _, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}

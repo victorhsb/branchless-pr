@@ -267,7 +267,12 @@ Options:
 
 #### `stack-pr land`
 
-Lands the bottom-most PR in the stack using GitHub squash merge, then rebases remaining stack branches onto the latest remote target. This command is only registered when config `land.style` is `bottom-only` (the default). If `land.style=disable`, the command is unavailable.
+Lands stacked PRs into the target branch. Two styles are supported:
+
+- `bottom-only` (default): squash-merges the bottom-most PR, then rebases the remaining stack branches onto the latest remote target.
+- `whole-stack`: retargets the tip PR's base to the target branch and performs a single GitHub rebase merge, landing every PR in the stack in one operation. Requires that the GitHub repository allows rebase merges; otherwise the command exits with an error and no mutation.
+
+The configured style is read from `land.style`. The `--whole-stack` flag overrides the configured style for a single invocation. This command is only registered when `land.style` is not `disable`. If `land.style=disable`, the command is unavailable.
 
 #### `stack-pr abandon`
 
@@ -320,7 +325,7 @@ branch_name_template=$USERNAME/stack
 ignore_authors=ci-bot,release-bot
 
 [land]
-style=bottom-only|disable
+style=bottom-only|whole-stack|disable
 ```
 
 The config command writes values as strings. Boolean values are later read with `ConfigParser.getboolean`.
@@ -576,9 +581,14 @@ gh pr edit <pr> -t <title> -F - -B <base>
 
 ## 15. Land algorithm
 
-`command_land(args)` implements bottom-only landing.
+`command_land(args)` implements stacked-PR landing. Two strategies are supported and share the same pre-flight and cleanup steps; only the merge step differs.
 
-Detailed behavior:
+### Effective style selection
+
+1. If `--whole-stack` is passed, the effective style is `whole-stack`.
+2. Otherwise the effective style is read from `land.style`, defaulting to `bottom-only` when unset or unrecognized.
+
+### Shared pre-flight (steps 1-6)
 
 1. Record current branch.
 2. Optionally update local base the same way `submit` does.
@@ -586,6 +596,9 @@ Detailed behavior:
 4. If empty: print `Empty stack!`.
 5. Set base branches and print stack.
 6. Verify with `check_base=True`.
+
+### Bottom-only style (default)
+
 7. Land the bottom-most PR:
    - Fetch/prune remote.
    - Checkout remote head branch locally with `git checkout REMOTE/<head> -B <head>`.
@@ -601,12 +614,24 @@ Detailed behavior:
      - Rebase branch onto `REMOTE/TARGET` with `--committer-date-is-author-date`.
      - Force-push `<head>:<head>`.
    - Set the new bottom PR base to the target branch.
-9. Checkout original branch.
-10. Delete local stack branches.
-11. If a local branch named target exists, rebase it onto `REMOTE/TARGET`.
-12. Rebase the original branch onto `REMOTE/TARGET`.
 
-The land command does not delete remote branches directly; GitHub may delete merged PR branches depending on repository settings.
+### Whole-stack style
+
+7. Resolve `owner/repo` from the configured remote URL.
+8. Query `repository.rebaseMergeAllowed` via `gh api graphql`. If the setting is false, print an error explaining that rebase merges are disabled and exit without mutating state. Propagate any API error.
+9. Fetch/prune remote.
+10. Retarget the tip PR base to the target branch with `gh pr edit <tip-pr> -B <target>`.
+11. Run `gh pr merge <tip-pr> --rebase`. All commits land linearly on the target branch in a single operation; no per-entry checkout, rebase, or force-push happens.
+12. Fetch/prune remote.
+
+### Shared cleanup (steps 9-12 / 13-16)
+
+- Checkout original branch.
+- Delete local stack branches.
+- If a local branch named target exists, rebase it onto `REMOTE/TARGET`.
+- Rebase the original branch onto `REMOTE/TARGET`.
+
+The land command does not delete remote branches directly; GitHub may delete merged PR branches depending on repository settings. The whole-stack style intentionally relies on GitHub's auto-close detection to close intermediate PRs after the tip merge.
 
 ## 16. Abandon algorithm
 

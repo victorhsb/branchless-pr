@@ -283,7 +283,9 @@ ignore_authors =
 experimental_engine = false
 
 [land]
-# Landing style: "bottom-only" merges only the bottom PR, "all" merges the whole stack.
+# Landing style: "bottom-only" squash-merges only the bottom PR and rebases the
+# rest; "whole-stack" retargets the tip PR to the target branch and performs a
+# GitHub rebase merge so the entire stack lands in one operation.
 # Set to "disable" to remove the land subcommand entirely.
 style = bottom-only
 `

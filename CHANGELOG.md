@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added `whole-stack` land style: lands every PR in the stack in a single
+  operation by retargeting the tip PR to the target branch and performing a
+  GitHub rebase merge. Selected via `land.style = whole-stack` in the config
+  or the `--whole-stack` flag on `stack-pr land`. The command pre-checks
+  `repository.rebaseMergeAllowed` via the GitHub GraphQL API and exits with a
+  clear error when rebase merges are disabled for the repository.
+
 ## v1.7.2 – 2026-05-22
 
 - Fixed `stack-pr view` printing "Stack:" to stdout instead of respecting
