@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## v1.8.0 – 2026-05-24
+
+- Added `install.sh` for GitHub-release installs. It installs the `bpr` binary
+  and creates a `stack-pr` symlink for backward compatibility.
+- Changed release artifacts to ship `bpr` as the primary standalone binary;
+  `stack-pr` remains available through the installer symlink.
+- Added an opt-in experimental submit/export engine via
+  `submit.experimental_engine = true` or `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1`.
+  The engine skips redundant PR edits and amended-branch pushes when stack
+  metadata and PR state already match.
+- Changed stack branch initialization to use branch ref updates instead of
+  checkout/reset, reducing worktree churn during submit/export.
+
 - Added `whole-stack` land style: lands every PR in the stack in a single
   operation by retargeting the tip PR to the target branch and performing a
   GitHub rebase merge. Selected via `land.style = whole-stack` in the config
