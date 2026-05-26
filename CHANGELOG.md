@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.8.1 – 2026-05-26
+
 - Fixed `submit` / `export` failing during branch initialization when the
   currently checked-out branch is a generated stack branch that already points
   at the expected commit.
