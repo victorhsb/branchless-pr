@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
@@ -159,6 +160,33 @@ func TestForceUpdateBranchResetsExistingBranch(t *testing.T) {
 	}
 	if got != oldSHA {
 		t.Fatalf("stack/one = %s, want %s", got, oldSHA)
+	}
+}
+
+func TestForceUpdateBranchSkipsCurrentBranchWhenAlreadyAtStartPoint(t *testing.T) {
+	repo := initTestRepo(t)
+	sha := commitTestFile(t, repo, "one.txt", "one")
+	withWorkingDir(t, repo)
+	runGitForTest(t, repo, "switch", "-c", "stack/one")
+
+	if err := ForceUpdateBranch("stack/one", sha); err != nil {
+		t.Fatalf("ForceUpdateBranch returned error: %v", err)
+	}
+}
+
+func TestForceUpdateBranchRejectsMovingCurrentBranch(t *testing.T) {
+	repo := initTestRepo(t)
+	oldSHA := commitTestFile(t, repo, "one.txt", "one")
+	commitTestFile(t, repo, "two.txt", "two")
+	withWorkingDir(t, repo)
+	runGitForTest(t, repo, "switch", "-c", "stack/one")
+
+	err := ForceUpdateBranch("stack/one", oldSHA)
+	if err == nil {
+		t.Fatalf("ForceUpdateBranch returned nil error")
+	}
+	if !strings.Contains(err.Error(), "cannot reset currently checked out branch") {
+		t.Fatalf("error = %q, want actionable checked-out branch message", err)
 	}
 }
 

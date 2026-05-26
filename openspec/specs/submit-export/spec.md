@@ -79,6 +79,20 @@ Submit/export SHALL create or ensure local generated branches for each stack ent
 - **WHEN** local generated branches are initialized
 - **THEN** the command SHALL preserve the current worktree branch unless a later submit/export step explicitly checks out or rebases a branch for metadata amendment, restoration, or cleanup
 
+#### Scenario: Current generated branch already initialized
+
+- **WHEN** local generated branches are initialized
+- **AND** one generated head branch is the currently checked-out branch
+- **AND** that branch already points at the corresponding stack commit
+- **THEN** the command SHALL treat that branch as already initialized instead of force-updating it
+
+#### Scenario: Current generated branch would need moving
+
+- **WHEN** local generated branches are initialized
+- **AND** one generated head branch is the currently checked-out branch
+- **AND** that branch does not point at the corresponding stack commit
+- **THEN** the command SHALL fail with an actionable error asking the user to switch to a non-generated branch before retrying
+
 ### Requirement: Base Branch Computation
 
 Submit/export SHALL compute base branches for every stack entry so each PR targets the correct branch.

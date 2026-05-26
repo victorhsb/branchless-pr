@@ -273,6 +273,29 @@ func Checkout(startPoint, branch string) error {
 
 // ForceUpdateBranch creates or resets branch from startPoint without switching the worktree.
 func ForceUpdateBranch(branch, startPoint string) error {
+	current, currentErr := CurrentBranchName()
+	if currentErr == nil && current == branch {
+		currentSHA, err := RevParse("HEAD")
+		if err != nil {
+			return &Error{Op: "force_update_branch", Err: err}
+		}
+		targetSHA, err := RevParse(startPoint)
+		if err != nil {
+			return &Error{Op: "force_update_branch", Err: err}
+		}
+		if currentSHA == targetSHA {
+			return nil
+		}
+		return &Error{
+			Op: "force_update_branch",
+			Err: fmt.Errorf(
+				"cannot reset currently checked out branch %q from %s to %s; switch to a non-generated branch and retry",
+				branch,
+				currentSHA,
+				targetSHA,
+			),
+		}
+	}
 	_, _, err := shell.Run(
 		[]string{"git", "branch", "-f", branch, startPoint},
 		shell.RunOpts{},

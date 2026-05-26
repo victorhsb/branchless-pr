@@ -506,6 +506,7 @@ Detailed behavior:
    - Fetch/prune remote.
    - Assign generated head branches to entries missing metadata heads.
    - For each entry, create or reset the local branch `<entry.head>` so it points at `<commit-id>` without requiring a worktree checkout for each stack entry.
+   - If `<entry.head>` is currently checked out and already points at `<commit-id>`, treat it as initialized instead of force-updating it. If it is currently checked out but points elsewhere, fail with an actionable message asking the user to switch to a non-generated branch before retrying.
 8. Compute base branches.
 9. Determine whether the original current branch needs rebasing: true if the top stack branch is an ancestor of the current branch.
 10. Reset remote base branches for existing PRs:
