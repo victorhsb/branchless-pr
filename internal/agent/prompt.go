@@ -13,6 +13,7 @@ const (
 	TopicLand     = "land"
 	TopicAbandon  = "abandon"
 	TopicConfig   = "config"
+	TopicFix      = "fix"
 	TopicRecovery = "recovery"
 	TopicAll      = "all"
 )
@@ -24,7 +25,7 @@ var TopicOrder = []string{
 	TopicSubmit,
 	TopicLand,
 	TopicAbandon,
-	TopicConfig,
+	TopicFix,
 	TopicRecovery,
 }
 
@@ -145,6 +146,23 @@ var topics = map[string]topicSpec{
 			"Only modify configuration when the user explicitly requests a change.",
 			"Ensure the working directory is at the repository root before writing configuration.",
 			"Do not modify configuration as part of normal stack operations.",
+		},
+	},
+	TopicFix: {
+		Name:    TopicFix,
+		Title:   "Fix",
+		Summary: "Guidance for local metadata repair on HEAD.",
+		Narrative: []string{
+			"Use `bpr fix --pr <number>` to attach an existing PR to local HEAD metadata when the commit message is missing or incorrect stack-info.",
+			"This command only amends the local HEAD commit. It does not push branches or write PR changes.",
+			"After fixing metadata, run `bpr submit` to push the amended commit and update PRs.",
+		},
+		CommandKeys: []string{"fix --dry-run", "fix"},
+		Rules: []string{
+			"Use fix when the user has an existing PR whose local commit is missing stack-info metadata.",
+			"Prefer `bpr fix --pr <number> --dry-run` first to preview the planned metadata change.",
+			"Always tell the user to run `bpr submit` after a successful fix to publish the amended commit.",
+			"Do not use fix as a substitute for submit when the user wants to publish or update PRs.",
 		},
 	},
 	TopicRecovery: {

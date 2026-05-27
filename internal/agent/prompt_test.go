@@ -153,8 +153,11 @@ func TestRenderJSONSideEffectMetadata(t *testing.T) {
 	want := map[string]bool{
 		"stack-pr view":             false,
 		"stack-pr comments":         false,
+		"stack-pr checks":           false,
 		"stack-pr submit --dry-run": false,
+		"stack-pr fix --dry-run":    false,
 		"stack-pr submit":           true,
+		"stack-pr fix":              true,
 		"stack-pr land":             true,
 		"stack-pr abandon":          true,
 		"stack-pr config":           true,

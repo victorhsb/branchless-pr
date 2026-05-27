@@ -14,6 +14,7 @@ import (
 type Info struct {
 	BaseRefName      string `json:"baseRefName"`
 	HeadRefName      string `json:"headRefName"`
+	HeadRefOid       string `json:"headRefOid"`
 	Number           int    `json:"number"`
 	State            string `json:"state"`
 	Body             string `json:"body"`
@@ -27,7 +28,7 @@ type Info struct {
 func View(prRef string) (*Info, error) {
 	args := []string{
 		"gh", "pr", "view", prRef,
-		"--json", "baseRefName,headRefName,number,state,body,title,url,mergeStateStatus,isDraft",
+		"--json", "baseRefName,headRefName,headRefOid,number,state,body,title,url,mergeStateStatus,isDraft",
 	}
 	out, err := shell.Output(args, shell.RunOpts{})
 	if err != nil {
@@ -40,7 +41,10 @@ func View(prRef string) (*Info, error) {
 	return &info, nil
 }
 
-// LoadForSubmit fetches the PR state submit/export needs for existing PRs.
+// ViewByNumber loads PR metadata by PR number (e.g., 42).
+func ViewByNumber(number int) (*Info, error) {
+	return View(fmt.Sprintf("%d", number))
+}
 func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
 	infos := make(map[string]*Info, len(prRefs))
 	for _, prRef := range prRefs {

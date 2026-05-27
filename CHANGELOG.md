@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## v1.9.0 – 2026-05-26
+
+- Added `bpr fix`, a local-only command for repairing stack metadata on `HEAD`.
+  Given `--pr <number>`, it loads the corresponding PR via `gh pr view` and amends
+  the current commit to append or replace the `stack-info: PR: <url>, branch:
+  <branch>` line. Refuses to overwrite existing metadata unless `--replace` is set.
+  Prints a warning and continues when the PR's head SHA differs from local
+  `HEAD`. Provides `--dry-run` for read-only inspection. Includes advisory
+  stack-readiness warnings after repair. On success, hints to run `bpr submit`
+  to push the amended commit and update PRs.
+- Added `fix` as a supported topic for `stack-pr agent prompt`, with guidance
+  describing it as a local recovery command and its `--dry-run` variant marked
+  `side_effects: false`.
+
 ## v1.8.1 – 2026-05-26
 
 - Fixed `submit` / `export` failing during branch initialization when the

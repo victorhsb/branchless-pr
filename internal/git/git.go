@@ -486,7 +486,43 @@ func parseRepoSlug(url string) (owner, repo string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// TargetExists returns nil if remote/target is a valid ref.
+// IsMergeInProgress reports whether a merge is currently active.
+func IsMergeInProgress(repoDir ...string) bool {
+	gitDir := ".git"
+	if len(repoDir) > 0 && repoDir[0] != "" {
+		gitDir = filepath.Join(repoDir[0], ".git")
+	}
+	_, err := os.Stat(filepath.Join(gitDir, "MERGE_HEAD"))
+	return err == nil
+}
+
+// IsCherryPickInProgress reports whether a cherry-pick is currently active.
+func IsCherryPickInProgress(repoDir ...string) bool {
+	gitDir := ".git"
+	if len(repoDir) > 0 && repoDir[0] != "" {
+		gitDir = filepath.Join(repoDir[0], ".git")
+	}
+	for _, name := range []string{"sequencer/todo", "CHERRY_PICK_HEAD"} {
+		if _, err := os.Stat(filepath.Join(gitDir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// AnySequencerInProgress reports whether any rebase, merge, or cherry-pick is active.
+func AnySequencerInProgress(repoDir ...string) bool {
+	return IsRebaseInProgress(repoDir...) || IsMergeInProgress(repoDir...) || IsCherryPickInProgress(repoDir...)
+}
+
+// CommitMsg returns the current commit message for HEAD.
+func CommitMsg() (string, error) {
+	out, err := shell.Output([]string{"git", "log", "-1", "--pretty=%B"}, shell.RunOpts{})
+	if err != nil {
+		return "", &Error{Op: "commit_msg", Err: err}
+	}
+	return out, nil
+}
 func TargetExists(remote, target string) error {
 	ref := remote + "/" + target
 	_, err := shell.Output(

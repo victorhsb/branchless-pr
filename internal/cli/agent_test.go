@@ -42,7 +42,7 @@ func TestAgentPromptDefaultEmitsAllText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, heading := range []string{"Overview", "View", "Submit", "Land", "Abandon", "Config", "Recovery"} {
+	for _, heading := range []string{"Overview", "View", "Submit", "Land", "Abandon", "Fix", "Recovery"} {
 		if !strings.Contains(out, "# stack-pr agent prompt: "+heading) {
 			t.Fatalf("output missing %s heading:\n%s", heading, out)
 		}
@@ -123,7 +123,7 @@ func TestAgentPromptRejectsUnknownTopic(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "unknown agent prompt topic") || !strings.Contains(err.Error(), "overview, view, submit, land, abandon, config, recovery, all") {
+	if !strings.Contains(err.Error(), "unknown agent prompt topic") || !strings.Contains(err.Error(), "overview, view, submit, land, abandon, fix, recovery, all") {
 		t.Fatalf("unclear error: %v", err)
 	}
 }

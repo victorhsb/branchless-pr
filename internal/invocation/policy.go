@@ -22,6 +22,9 @@ func PolicyFor(command string, inAgentSubtree, inConfigSubtree bool) CommandPoli
 		policy.AllowsDirty = true
 	case "submit", "export":
 		policy.UsesStash = true
+	case "fix":
+		// fix requires clean tree (no dirty allowed), no stash, requires target branch
+		// Does not allow dirty, does not use stash, requires target
 	}
 	return policy
 }

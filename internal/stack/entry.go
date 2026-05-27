@@ -134,7 +134,15 @@ func (e *Entry) MetadataLine() string {
 	return fmt.Sprintf("\nstack-info: PR: %s, branch: %s", e.pr, e.headBranch)
 }
 
-// PRNumber extracts the numeric PR number from the PR URL or ref.
+// ExtractStackInfo parses the stack-info line from a commit message string and
+// returns the PR URL and branch. If no metadata is found, both returns are empty.
+func ExtractStackInfo(msg string) (prURL, branch string) {
+	m := stackInfoRe.FindStringSubmatch(msg)
+	if m == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(m[1]), strings.TrimSpace(m[2])
+}
 func (e *Entry) PRNumber() (int, error) {
 	if e.pr == "" {
 		return 0, fmt.Errorf("no PR")

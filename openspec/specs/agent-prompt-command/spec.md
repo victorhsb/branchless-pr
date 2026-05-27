@@ -31,7 +31,7 @@ The `stack-pr agent prompt` subcommand MUST emit deterministic, static guidance 
 
 - **WHEN** the user runs `stack-pr agent prompt` with no positional topic argument
 - **THEN** the command exits successfully
-- **AND** the output contains guidance for all supported topics (`overview`, `view`, `submit`, `land`, `abandon`, `recovery`)
+- **AND** the output contains guidance for all supported topics (`overview`, `view`, `submit`, `land`, `abandon`, `fix`, `recovery`)
 
 #### Scenario: Determinism across runs
 
@@ -50,18 +50,18 @@ The `stack-pr agent prompt` subcommand MUST emit deterministic, static guidance 
 
 ### Requirement: Supported prompt topics
 
-The `agent prompt` subcommand MUST accept an optional positional topic argument with exactly the following allowed values: `overview`, `view`, `submit`, `land`, `abandon`, `recovery`, `all`.
+The `agent prompt` subcommand MUST accept an optional positional topic argument with exactly the following allowed values: `overview`, `view`, `submit`, `land`, `abandon`, `fix`, `recovery`, `all`.
 
 #### Scenario: Topic-specific output
 
-- **WHEN** the user runs `stack-pr agent prompt submit`
-- **THEN** the output contains guidance scoped to the `submit` command flow
-- **AND** the output does NOT contain the guidance bodies of unrelated topics such as `abandon` or `recovery`
+- **WHEN** the user runs `stack-pr agent prompt fix`
+- **THEN** the output contains guidance scoped to the `fix` command flow
+- **AND** the output does NOT contain the guidance bodies of unrelated topics such as `submit` or `recovery`
 
 #### Scenario: `all` topic emits the full pack
 
 - **WHEN** the user runs `stack-pr agent prompt all`
-- **THEN** the output contains guidance for every other supported topic in a canonical, stable order: `overview`, `view`, `submit`, `land`, `abandon`, `recovery`
+- **THEN** the output contains guidance for every other supported topic in a canonical, stable order: `overview`, `view`, `submit`, `land`, `abandon`, `fix`, `recovery`
 
 #### Scenario: Unknown topic is rejected
 
@@ -126,3 +126,26 @@ The JSON output of `agent prompt` MUST carry a stable, agent-consumable schema. 
 
 - **WHEN** the user runs `stack-pr agent prompt <topic> --format json` for any single supported topic other than `all`
 - **THEN** the resulting JSON object contains an `audience` field with value `"llm-agent"`
+
+### Requirement: Fix Prompt Guidance
+
+The agent prompt content SHALL describe `fix` as a local recovery command for repairing stack metadata on `HEAD`.
+
+#### Scenario: Fix guidance explains local-only repair
+
+- **WHEN** the user runs `stack-pr agent prompt fix`
+- **THEN** the output SHALL describe `bpr fix --pr <number>` as a command for attaching an existing PR to local `HEAD` metadata
+- **AND** the output SHALL state that the command does not push branches or write PR changes
+- **AND** the output SHALL tell agents to use `bpr submit` afterward when the user wants to publish the amended commit and update PRs
+
+#### Scenario: Fix dry-run is marked read-only
+
+- **WHEN** the user runs `stack-pr agent prompt fix --format json`
+- **THEN** the JSON command guidance SHALL include `bpr fix --pr <number> --dry-run`
+- **AND** that dry-run command SHALL have `side_effects: false`
+
+#### Scenario: Fix mutation is marked side-effecting
+
+- **WHEN** the user runs `stack-pr agent prompt fix --format json`
+- **THEN** the JSON command guidance SHALL include `bpr fix --pr <number>`
+- **AND** that command SHALL have `side_effects: true`

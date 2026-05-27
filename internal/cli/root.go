@@ -223,6 +223,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 	// Add subcommands
 	root.AddCommand(submitCmd()) // submit has alias "export"
 	root.AddCommand(viewCmd())
+	root.AddCommand(fixCmd())
 	root.AddCommand(commentsCmd())
 	root.AddCommand(checksCmd())
 

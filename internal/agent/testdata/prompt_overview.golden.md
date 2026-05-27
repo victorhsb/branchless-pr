@@ -10,7 +10,9 @@ Prefer read-only commands first, and ask before commands that mutate Git, branch
 
 - `stack-pr view` — Inspect the local stack and PR metadata without changing commits or PRs. Side effects: no.
 - `stack-pr comments` — Collect PR review comments across the stack without changing commits or PRs. Side effects: no.
+- `stack-pr checks` — Report CI and review-attention state across the stack without changing commits or PRs. Side effects: no.
 - `stack-pr submit --dry-run` — Preview the PR create/update plan without local Git mutations, pushes, or GitHub writes. Side effects: no.
+- `stack-pr fix --dry-run` — Preview metadata repair on HEAD without amending the commit or writing to GitHub. Side effects: no.
 - `stack-pr submit` — Create or update GitHub PRs for each commit in the stack. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - May rebase local commits when updating the base.
@@ -18,6 +20,10 @@ Prefer read-only commands first, and ask before commands that mutate Git, branch
   - Force-pushes generated stack branches.
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
+- `stack-pr fix` — Repair stack-info metadata on HEAD from an existing PR. Side effects: yes. Requires explicit user confirmation.
+  Effects:
+  - Amends HEAD to add or replace stack-info metadata.
+  - Does not create branches, push branches, or modify PRs on GitHub.
 - `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Merges the bottom pull request on GitHub.

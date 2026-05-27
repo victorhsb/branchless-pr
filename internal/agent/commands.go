@@ -17,8 +17,11 @@ type AgentCommandSpec struct {
 var CommandKeys = []string{
 	"view",
 	"comments",
+	"checks",
 	"submit --dry-run",
+	"fix --dry-run",
 	"submit",
+	"fix",
 	"land",
 	"abandon",
 	"config",
@@ -76,6 +79,18 @@ var Commands = map[string]AgentCommandSpec{
 			"Assume the dry-run applied any of the displayed changes.",
 		},
 	},
+	"fix --dry-run": {
+		Name:        "stack-pr fix --dry-run",
+		Purpose:     "Preview metadata repair on HEAD without amending the commit or writing to GitHub.",
+		SideEffects: false,
+		SafeBefore: []string{
+			"Asking the user to approve a real fix before amending HEAD.",
+			"Inspecting what PR metadata would be attached to HEAD.",
+		},
+		Never: []string{
+			"Assume the dry-run changed any local commit.",
+		},
+	},
 	"submit": {
 		Name:                         "stack-pr submit",
 		Purpose:                      "Create or update GitHub PRs for each commit in the stack.",
@@ -95,6 +110,24 @@ var Commands = map[string]AgentCommandSpec{
 		Never: []string{
 			"Run without explicit user intent to publish or update PRs.",
 			"Use as a read-only inspection command.",
+		},
+	},
+	"fix": {
+		Name:                         "stack-pr fix",
+		Purpose:                      "Repair stack-info metadata on HEAD from an existing PR.",
+		SideEffects:                  true,
+		RequiresExplicitConfirmation: true,
+		Effects: []string{
+			"Amends HEAD to add or replace stack-info metadata.",
+			"Does not create branches, push branches, or modify PRs on GitHub.",
+		},
+		SafeBefore: []string{
+			"The commit is missing stack-info metadata for an existing PR.",
+			"The user wants to repair HEAD metadata before running submit.",
+		},
+		Never: []string{
+			"Use fix as a substitute for submit when the user wants to publish or update PRs.",
+			"Run fix when the user only wants read-only inspection.",
 		},
 	},
 	"land": {
