@@ -58,8 +58,10 @@ func TestLandCmdRegistersWholeStackFlag(t *testing.T) {
 // - log every invocation to gh.log / git.log
 // - dispatch to canned responses based on the first arguments
 // rebaseMergeAllowed controls the GraphQL response, branchExists controls
-// the show-ref exit code (true → exit 0, false → exit 1).
-func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, branchExists bool) (ghLog, gitLog string) {
+// the show-ref exit code (true -> exit 0, false -> exit 1).
+// mergeQueueEnabled controls the rules API response (true -> returns a
+// merge_queue rule, false -> returns empty array).
+func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, branchExists, mergeQueueEnabled bool) (ghLog, gitLog string) {
 	t.Helper()
 	binDir := t.TempDir()
 	ghLog = filepath.Join(binDir, "gh.log")
@@ -69,10 +71,18 @@ func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, branchExists bool
 	if rebaseMergeAllowed {
 		allowed = "true"
 	}
+	mqRules := "[]"
+	if mergeQueueEnabled {
+		mqRules = `[{"type":"merge_queue","parameters":{"merge_method":"rebase_or_merge"}}]`
+	}
 	ghScript := `#!/bin/sh
 printf '%s\n' "$*" >> "$GH_LOG"
 if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
   printf '{"data":{"repository":{"rebaseMergeAllowed":` + allowed + `}}}\n'
+  exit 0
+fi
+if [ "$1" = "api" ] && [ "$2" = "repos/acme/widget/rules/branches/main" ]; then
+  printf '` + mqRules + `\n'
   exit 0
 fi
 exit 0
@@ -120,7 +130,7 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fakes are Unix-only")
 	}
-	ghLog, gitLog := installFakeShellForLand(t, true, false)
+	ghLog, gitLog := installFakeShellForLand(t, true, false, true)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
@@ -134,22 +144,27 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 			t.Fatalf("landWholeStackImpl returned error: %v", err)
 		}
 	})
-	_ = out
+
+	if !strings.Contains(out, "Whole-stack landing has been queued") {
+		t.Fatalf("expected queued message in output, got:\n%s", out)
+	}
 
 	gh := readTestFile(t, ghLog)
 	mustContain(t, gh, "api graphql")
+	mustContain(t, gh, "api repos/acme/widget/rules/branches/main")
 	mustContain(t, gh, "pr edit https://github.com/acme/widget/pull/1 -B main")
-	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/1 --rebase")
+	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/1 --rebase --auto")
 
 	git := readTestFile(t, gitLog)
 	mustContain(t, git, "remote get-url origin")
 	mustContain(t, git, "fetch --prune origin")
 	mustContain(t, git, "checkout feature")
-	mustContain(t, git, "branch -D alice/stack/1")
-	mustContain(t, git, "rebase origin/main feature")
-	// show-ref returned 1 → no local target rebase expected.
-	if strings.Contains(git, "rebase origin/main main") {
-		t.Fatalf("did not expect local main rebase, log:\n%s", git)
+	// Queued whole-stack mode does NOT delete branches or rebase.
+	if strings.Contains(git, "branch -D") {
+		t.Fatalf("did not expect branch deletion in queued mode, git log:\n%s", git)
+	}
+	if strings.Contains(git, "rebase") {
+		t.Fatalf("did not expect rebase in queued mode, git log:\n%s", git)
 	}
 }
 
@@ -157,7 +172,7 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fakes are Unix-only")
 	}
-	ghLog, gitLog := installFakeShellForLand(t, true, true)
+	ghLog, gitLog := installFakeShellForLand(t, true, true, true)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
@@ -175,9 +190,9 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 	})
 
 	gh := readTestFile(t, ghLog)
-	// Only the tip PR is edited and merged.
+	// Only the tip PR is edited and queued for merge.
 	mustContain(t, gh, "pr edit https://github.com/acme/widget/pull/3 -B main")
-	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/3 --rebase")
+	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/3 --rebase --auto")
 	if strings.Contains(gh, "pr merge https://github.com/acme/widget/pull/1") ||
 		strings.Contains(gh, "pr merge https://github.com/acme/widget/pull/2") {
 		t.Fatalf("unexpected merge of non-tip PR in log:\n%s", gh)
@@ -187,10 +202,13 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 	}
 
 	git := readTestFile(t, gitLog)
-	mustContain(t, git, "branch -D alice/stack/1 alice/stack/2 alice/stack/3")
-	// branchExists=true → local main rebase expected.
-	mustContain(t, git, "rebase origin/main main")
-	mustContain(t, git, "rebase origin/main feature")
+	// Queued mode does NOT delete local branches or rebase.
+	if strings.Contains(git, "branch -D") {
+		t.Fatalf("did not expect branch deletion in queued mode, git log:\n%s", git)
+	}
+	if strings.Contains(git, "rebase") {
+		t.Fatalf("did not expect rebase in queued mode, git log:\n%s", git)
+	}
 	// No per-entry rebase/push for intermediate branches.
 	if strings.Contains(git, "push -f origin alice/stack/1:alice/stack/1") {
 		t.Fatalf("did not expect intermediate force-push, log:\n%s", git)
@@ -201,7 +219,7 @@ func TestLandWholeStackRejectedWhenRebaseDisallowed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fakes are Unix-only")
 	}
-	ghLog, gitLog := installFakeShellForLand(t, false, false)
+	ghLog, gitLog := installFakeShellForLand(t, false, false, false)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
@@ -226,5 +244,95 @@ func TestLandWholeStackRejectedWhenRebaseDisallowed(t *testing.T) {
 	git := readTestFile(t, gitLog)
 	if strings.Contains(git, "fetch") || strings.Contains(git, "checkout") {
 		t.Fatalf("expected no fetch/checkout when rebase disallowed, git log:\n%s", git)
+	}
+}
+
+func TestLandWholeStackRejectedWhenMergeQueueDisabled(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fakes are Unix-only")
+	}
+	ghLog, gitLog := installFakeShellForLand(t, true, false, false)
+
+	app := &invocation.AppContext{
+		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
+		OrigBranch: "feature",
+	}
+	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
+	st := stack.Stack{tip}
+
+	err := landWholeStackImpl(app, st)
+	if err == nil {
+		t.Fatalf("expected error when merge queue is disabled")
+	}
+	if !strings.Contains(err.Error(), "--whole-stack only works for repositories with merge queue enabled") {
+		t.Fatalf("error = %v, want merge-queue error", err)
+	}
+
+	// No mutating gh/git calls should have happened after the rules check.
+	gh := readTestFile(t, ghLog)
+	if strings.Contains(gh, "pr edit") || strings.Contains(gh, "pr merge") {
+		t.Fatalf("expected no PR edits/merges when merge queue disabled, gh log:\n%s", gh)
+	}
+	git := readTestFile(t, gitLog)
+	if strings.Contains(git, "fetch") || strings.Contains(git, "checkout") {
+		t.Fatalf("expected no fetch/checkout when merge queue disabled, git log:\n%s", git)
+	}
+}
+
+func TestLandWholeStackUnknownMergeQueueProceedsAndNormalizes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fakes are Unix-only")
+	}
+	binDir := t.TempDir()
+	ghLog := filepath.Join(binDir, "gh.log")
+	gitLog := filepath.Join(binDir, "git.log")
+
+	ghScript := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_LOG"
+if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  printf '{"data":{"repository":{"rebaseMergeAllowed":true}}}\n'
+  exit 0
+fi
+if [ "$1" = "api" ] && [ "$2" = "repos/acme/widget/rules/branches/main" ]; then
+  printf '{"message":"Not Found"}\n'
+  exit 1
+fi
+if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
+  printf 'merge queue is not enabled for this branch\n' >&2
+  exit 1
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghScript), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+
+	gitScript := `#!/bin/sh
+printf '%s\n' "$*" >> "$GIT_LOG"
+if [ "$1" = "remote" ] && [ "$2" = "get-url" ]; then
+  printf 'https://github.com/acme/widget.git\n'
+fi
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(binDir, "git"), []byte(gitScript), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("GH_LOG", ghLog)
+	t.Setenv("GIT_LOG", gitLog)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	app := &invocation.AppContext{
+		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
+		OrigBranch: "feature",
+	}
+	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
+	st := stack.Stack{tip}
+
+	err := landWholeStackImpl(app, st)
+	if err == nil {
+		t.Fatalf("expected error when merge queue is disabled")
+	}
+	if !strings.Contains(err.Error(), "--whole-stack only works for repositories with merge queue enabled") {
+		t.Fatalf("error = %v, want normalized merge-queue error", err)
 	}
 }

@@ -19,8 +19,10 @@ func landCmd() *cobra.Command {
 
 The default "bottom-only" style squash-merges the bottom PR and rebases the
 rest of the stack. The "whole-stack" style (set via land.style or the
---whole-stack flag) retargets the tip PR to the target branch and performs a
-GitHub rebase merge so the entire stack lands in a single operation.`,
+--whole-stack flag) retargets the tip PR to the target branch and queues a
+GitHub rebase auto-merge so the entire stack lands in a single operation.
+Whole-stack requires that the repository target branch has GitHub merge queue
+enabled.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, ok := FromContext(cmd.Context())
 			if !ok {
@@ -169,6 +171,14 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 		return fmt.Errorf("ERROR: Repository %s/%s does not allow rebase merges. Enable rebase merges in repository settings or use land.style = bottom-only.", owner, repo)
 	}
 
+	mqStatus, err := pr.MergeQueueEnabled(owner, repo, app.Args.Target)
+	if err != nil {
+		return fmt.Errorf("ERROR: Cannot query repository merge queue settings: %w", err)
+	}
+	if mqStatus == pr.MergeQueueStatusDisabled {
+		return fmt.Errorf("ERROR: --whole-stack only works for repositories with merge queue enabled")
+	}
+
 	if err := git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
@@ -177,15 +187,15 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 	if err := pr.EditBase(tip.PR(), app.Args.Target); err != nil {
 		return fmt.Errorf("ERROR: Cannot set base on tip PR: %w", err)
 	}
-	if err := pr.MergeRebase(tip.PR()); err != nil {
-		return fmt.Errorf("ERROR: Cannot rebase-merge tip PR: %w", err)
-	}
-
-	if err := git.Fetch(app.Args.Remote); err != nil {
+	if err := pr.MergeRebaseAuto(tip.PR()); err != nil {
 		return err
 	}
 
-	return landCleanup(app, st)
+	if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+		return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
+	}
+	fmt.Printf("Whole-stack landing has been queued for %s\n", tip.PR())
+	return nil
 }
 
 // landCleanup restores the original branch, deletes local stack branches, and

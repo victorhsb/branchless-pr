@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Changed `whole-stack` land style to require GitHub merge queue and queue the
+  tip PR for GitHub-managed merge via `gh pr merge --rebase --auto` instead of
+  attempting an immediate merge. The command now preflights merge queue support
+  via the GitHub rules API before mutating any state. If merge queue is not
+  enabled, it exits with `ERROR: --whole-stack only works for repositories with
+  merge queue enabled`. After successful queue scheduling, the command restores
+  the original branch and skips post-merge cleanup (no branch deletion, target
+  rebase, or original branch rebase) because the stack has not yet landed.
+- Preserved `bottom-only` land behavior unchanged.
 
 ## v1.9.1 - 2026-06-08
 

@@ -222,6 +222,69 @@ func rebaseMergeAllowedWith(owner, repo string, run graphqlRunner) (bool, error)
 	return resp.Data.Repository.RebaseMergeAllowed, nil
 }
 
+// MergeQueueStatus indicates whether merge queue is confirmed enabled,
+// confirmed disabled, or could not be determined.
+type MergeQueueStatus string
+
+const (
+	MergeQueueStatusEnabled  MergeQueueStatus = "enabled"
+	MergeQueueStatusDisabled MergeQueueStatus = "disabled"
+	MergeQueueStatusUnknown  MergeQueueStatus = "unknown"
+)
+
+// MergeQueueEnabled queries GitHub for merge-queue rules on the target branch.
+// It prefers the REST rules API and returns MergeQueueStatusUnknown when the API
+// cannot provide a reliable answer.
+func MergeQueueEnabled(owner, repo, targetBranch string) (MergeQueueStatus, error) {
+	return mergeQueueEnabledWith(owner, repo, targetBranch, ghAPIRules)
+}
+
+type rulesRunner func(owner, repo, branch string) ([]byte, error)
+
+func mergeQueueEnabledWith(owner, repo, targetBranch string, run rulesRunner) (MergeQueueStatus, error) {
+	out, err := run(owner, repo, targetBranch)
+	if err != nil {
+		return MergeQueueStatusUnknown, nil // cannot confirm support
+	}
+	var rules []struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(out, &rules); err != nil {
+		return MergeQueueStatusUnknown, nil // cannot confirm support
+	}
+	for _, r := range rules {
+		if r.Type == "merge_queue" {
+			return MergeQueueStatusEnabled, nil
+		}
+	}
+	return MergeQueueStatusDisabled, nil
+}
+
+func ghAPIRules(owner, repo, branch string) ([]byte, error) {
+	path := fmt.Sprintf("repos/%s/%s/rules/branches/%s", owner, repo, branch)
+	args := []string{"gh", "api", path}
+	out, _, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// MergeRebaseAuto queues a rebase merge for a PR via `gh pr merge --rebase --auto`.
+// When the target branch requires a merge queue, GitHub adds the PR to the queue
+// once requirements are met; otherwise it enables auto-merge.
+func MergeRebaseAuto(prRef string) error {
+	args := []string{"gh", "pr", "merge", prRef, "--rebase", "--auto"}
+	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
+	if err != nil {
+		msg := string(stderr)
+		if isMergeQueueDisabledError(msg) {
+			return fmt.Errorf("ERROR: --whole-stack only works for repositories with merge queue enabled")
+		}
+		return fmt.Errorf("gh pr merge --rebase --auto %s: %w", prRef, err)
+	}
+	return nil
+}
 func ghAPIGraphQL(query string, fields map[string]string) ([]byte, error) {
 	args := []string{"gh", "api", "graphql", "-f", "query=" + query}
 	for k, v := range fields {
@@ -232,4 +295,11 @@ func ghAPIGraphQL(query string, fields map[string]string) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+func isMergeQueueDisabledError(stderr string) bool {
+	lower := strings.ToLower(stderr)
+	return strings.Contains(lower, "merge queue") ||
+		strings.Contains(lower, "auto-merge") ||
+		strings.Contains(lower, "not enabled")
 }

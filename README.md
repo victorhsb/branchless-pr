@@ -93,7 +93,7 @@ stack-pr abandon
 | `stack-pr view` | Inspect the stack without modifying anything. |
 | `stack-pr comments` | Collect PR comments, reviews, and review threads across the stack. |
 | `stack-pr checks` | Report all CI checks and brief review-attention state across the stack. |
-| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. |
+| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. |
 | `stack-pr abandon` | Strip stack metadata and delete generated branches. |
 | `stack-pr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
 | `stack-pr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
@@ -278,7 +278,7 @@ Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). Th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `style` | string | `bottom-only` | `bottom-only` merges the bottom PR and rebases the rest. `all` merges the whole stack. `disable` removes the `land` subcommand entirely. |
+| `style` | string | `bottom-only` | `bottom-only` merges the bottom PR and rebases the rest. `whole-stack` queues the tip PR for merge-queue landing. `disable` removes the `land` subcommand entirely. |
 
 ### Example file
 

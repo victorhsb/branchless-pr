@@ -274,7 +274,7 @@ Options:
 Lands stacked PRs into the target branch. Two styles are supported:
 
 - `bottom-only` (default): squash-merges the bottom-most PR, then rebases the remaining stack branches onto the latest remote target.
-- `whole-stack`: retargets the tip PR's base to the target branch and performs a single GitHub rebase merge, landing every PR in the stack in one operation. Requires that the GitHub repository allows rebase merges; otherwise the command exits with an error and no mutation.
+- `whole-stack`: retargets the tip PR's base to the target branch and queues a GitHub rebase auto-merge so the entire stack lands in a single operation. Requires that the repository allows rebase merges and that the target branch has GitHub merge queue enabled; otherwise the command exits with an error and no mutation.
 
 The configured style is read from `land.style`. The `--whole-stack` flag overrides the configured style for a single invocation. This command is only registered when `land.style` is not `disable`. If `land.style=disable`, the command is unavailable.
 
@@ -624,19 +624,30 @@ gh pr edit <pr> -t <title> -F - -B <base>
 
 7. Resolve `owner/repo` from the configured remote URL.
 8. Query `repository.rebaseMergeAllowed` via `gh api graphql`. If the setting is false, print an error explaining that rebase merges are disabled and exit without mutating state. Propagate any API error.
-9. Fetch/prune remote.
-10. Retarget the tip PR base to the target branch with `gh pr edit <tip-pr> -B <target>`.
-11. Run `gh pr merge <tip-pr> --rebase`. All commits land linearly on the target branch in a single operation; no per-entry checkout, rebase, or force-push happens.
-12. Fetch/prune remote.
+9. Query the repository target branch rules via `gh api repos/<owner>/<repo>/rules/branches/<target>`. If a `merge_queue` rule is present, merge queue is confirmed enabled. If the rules API returns successfully but contains no `merge_queue` rule, print `ERROR: --whole-stack only works for repositories with merge queue enabled` and exit without mutating state. If the API cannot provide a reliable answer, proceed and allow the subsequent `gh pr merge` failure to be normalized into the same error message.
+10. Fetch/prune remote.
+11. Retarget the tip PR base to the target branch with `gh pr edit <tip-pr> -B <target>`.
+12. Run `gh pr merge <tip-pr> --rebase --auto`. This queues the PR for GitHub-managed merge; the command does not poll GitHub for CI or merge completion.
+13. Checkout the original recorded branch.
+14. Print a message that whole-stack landing has been queued for the tip PR.
 
-### Shared cleanup (steps 9-12 / 13-16)
+### Bottom-only cleanup (steps 9-12)
 
 - Checkout original branch.
 - Delete local stack branches.
 - If a local branch named target exists, rebase it onto `REMOTE/TARGET`.
 - Rebase the original branch onto `REMOTE/TARGET`.
 
-The land command does not delete remote branches directly; GitHub may delete merged PR branches depending on repository settings. The whole-stack style intentionally relies on GitHub's auto-close detection to close intermediate PRs after the tip merge.
+### Whole-stack queued cleanup (steps 13-14)
+
+After queue scheduling succeeds:
+- Checkout the original recorded branch.
+- Do NOT delete local stack branches.
+- Do NOT rebase the local target branch.
+- Do NOT rebase the original branch onto `REMOTE/TARGET`.
+- Do NOT fetch the remote.
+
+The land command does not delete remote branches directly; GitHub may delete merged PR branches depending on repository settings. The whole-stack style intentionally relies on GitHub's auto-close detection to close intermediate PRs after the tip merge. Because the tip PR is only queued rather than immediately merged, local cleanup that assumes the target branch already advanced is skipped.
 
 ## 16. Abandon algorithm
 
