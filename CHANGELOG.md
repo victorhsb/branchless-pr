@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v1.9.1 - 2026-06-08
+
+- Fixed `submit` / `export` commit metadata formatting for title-only commits.
+  The `stack-info` line is now written as its own paragraph so GitHub and Git
+  tooling do not display it as part of the commit title.
+
 ## v1.9.0 – 2026-05-26
 
 - Added `bpr fix`, a local-only command for repairing stack metadata on `HEAD`.
