@@ -227,6 +227,7 @@ Submit/export SHALL amend commits to embed `stack-info` metadata so subsequent c
 - **WHEN** metadata is added and no rebase is needed for the current branch
 - **THEN** the first changed commit's head branch SHALL be checked out
 - **AND** the `stack-info: PR: <pr-url>, branch: <head>` line SHALL be appended to its commit message
+- **AND** the metadata line SHALL be separated from the commit title/body by at least one blank line
 - **AND** the commit SHALL be amended with `git commit --amend -F -`
 
 #### Scenario: Subsequent commits rebased and amended

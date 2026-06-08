@@ -133,6 +133,10 @@ Submitted commits are amended with a metadata line in their commit message:
 stack-info: PR: <pr-url-or-ref>, branch: <generated-head-branch>
 ```
 
+Writers place the metadata in its own paragraph: there is at least one blank
+line between the commit title/body and the `stack-info` line. This keeps
+title-only commits from displaying the metadata as part of the title.
+
 The parser recognizes this exact line pattern with a leading newline:
 
 ```regex

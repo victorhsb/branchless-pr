@@ -129,9 +129,9 @@ func (e *Entry) StripMetadata() string {
 	return stackInfoRe.ReplaceAllString(msg, "")
 }
 
-// MetadataLine returns the stack-info line to append to a commit message.
+// MetadataLine returns the stack-info line as its own commit-message paragraph.
 func (e *Entry) MetadataLine() string {
-	return fmt.Sprintf("\nstack-info: PR: %s, branch: %s", e.pr, e.headBranch)
+	return fmt.Sprintf("\n\nstack-info: PR: %s, branch: %s", e.pr, e.headBranch)
 }
 
 // ExtractStackInfo parses the stack-info line from a commit message string and

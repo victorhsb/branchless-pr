@@ -67,6 +67,7 @@ Before repairing metadata, `fix` SHALL validate repository state and block unsaf
 - **WHEN** `HEAD` has no `stack-info` metadata
 - **AND** the user runs `bpr fix --pr <number>`
 - **THEN** the command SHALL append `stack-info: PR: <pr-url>, branch: <head-branch>` to the current commit message
+- **AND** the metadata line SHALL be separated from the commit title/body by at least one blank line
 - **AND** the command SHALL amend `HEAD` with `git commit --amend -F -`
 
 #### Scenario: Matching metadata is already fixed

@@ -95,9 +95,25 @@ func TestMetadataLineFormat(t *testing.T) {
 	e.SetPR("99")
 	e.SetHead("alice/stack/1")
 	got := e.MetadataLine()
-	want := "\nstack-info: PR: 99, branch: alice/stack/1"
+	want := "\n\nstack-info: PR: 99, branch: alice/stack/1"
 	if got != want {
 		t.Fatalf("MetadataLine = %q, want %q", got, want)
+	}
+}
+
+func TestMetadataLineSeparatesTitleOnlyCommit(t *testing.T) {
+	h := &Header{
+		SHA:   "0123456789abcdef0123456789abcdef01234567",
+		Title: "Title only",
+	}
+	e := &Entry{Commit: h}
+	e.SetPR("99")
+	e.SetHead("alice/stack/1")
+
+	got := e.Commit.CommitMsg() + e.MetadataLine()
+	want := "Title only\n\nstack-info: PR: 99, branch: alice/stack/1"
+	if got != want {
+		t.Fatalf("commit message with metadata = %q, want %q", got, want)
 	}
 }
 
