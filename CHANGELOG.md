@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+
+## v1.10.0 - 2026-06-09
+
 - Changed `whole-stack` land style to require GitHub merge queue and queue the
   tip PR for GitHub-managed merge via `gh pr merge --rebase --auto` instead of
   attempting an immediate merge. The command now preflights merge queue support
