@@ -216,7 +216,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 	root.PersistentFlags().BoolVar(&flagHyperlinks, "hyperlinks", true, "Enable terminal hyperlinks")
 	root.PersistentFlags().BoolVar(&flagNoHyperlinks, "no-hyperlinks", false, "Disable terminal hyperlinks")
 	root.PersistentFlags().BoolVarP(&flagVerbose, "verbose", "V", false, "Show verbose Git/GH subprocess output")
-	root.PersistentFlags().StringVar(&flagBranchTemplate, "branch-name-template", "", "Generated branch template; default $USERNAME/stack")
+	root.PersistentFlags().StringVarP(&flagBranchTemplate, "branch-name-template", "b", "", "Generated branch template; default $USERNAME/stack")
 	root.PersistentFlags().BoolVar(&flagShowTips, "show-tips", true, "Show post-command guidance")
 	root.PersistentFlags().BoolVar(&flagNoShowTips, "no-show-tips", false, "Suppress post-command guidance")
 
@@ -247,7 +247,7 @@ func argsSelectAgent(args []string) bool {
 		"-B": {}, "--base": {},
 		"-H": {}, "--head": {},
 		"-T": {}, "--target": {},
-		"--branch-name-template": {},
+		"-b": {}, "--branch-name-template": {},
 	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

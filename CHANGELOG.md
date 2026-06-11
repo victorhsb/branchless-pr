@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `-b` shorthand for `--branch-name-template` flag.
+
 ## v1.10.0 - 2026-06-09
 
 - Changed `whole-stack` land style to require GitHub merge queue and queue the
