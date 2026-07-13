@@ -45,7 +45,7 @@ Use --dry-run to preview the planned actions without applying any local Git or G
 	cmd.Flags().BoolVarP(&opts.Draft, "draft", "d", false, "Create all new PRs as draft")
 	cmd.Flags().StringVar(&opts.DraftBitmask, "draft-bitmask", "", "Per-PR draft bitmask; chars must be 0 or 1")
 	cmd.Flags().StringVar(&opts.Reviewer, "reviewer", "", "Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer")
-	cmd.Flags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and pop afterward")
+	cmd.Flags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and restore afterward")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Preview submit/export actions without applying local Git or GitHub changes")
 
 	return cmd
@@ -53,8 +53,8 @@ Use --dry-run to preview the planned actions without applying any local Git or G
 
 func submitImpl(app *AppContext, opts submitOptions) (err error) {
 	defer func() {
-		if err == nil && app.StashCreated {
-			if perr := git.StashPop(); perr != nil {
+		if err == nil {
+			if perr := app.RestoreStash(); perr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to pop stash: %v\n", perr)
 			}
 		}

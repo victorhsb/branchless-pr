@@ -80,46 +80,93 @@ func TestBranchlessStackHeadReturnsFalseWhenUnavailable(t *testing.T) {
 	}
 }
 
-func TestIsRebaseInProgressDetectsRebaseMerge(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-merge"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Need a fake repo root resolved from this dir. We can't easily without
-	// initializing a real git repo, so just check the function reads from
-	// disk relative to RepoRoot - which falls back to false.
-	// Instead, initialize a tiny repo so RepoRoot works.
-	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cwd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
+func TestGitOperationDetectionRecognizesMarkers(t *testing.T) {
+	tests := []struct {
+		name      string
+		marker    string
+		directory bool
+		detect    func(...string) bool
+	}{
+		{name: "rebase merge", marker: "rebase-merge", directory: true, detect: IsRebaseInProgress},
+		{name: "rebase apply", marker: "rebase-apply", directory: true, detect: IsRebaseInProgress},
+		{name: "merge", marker: "MERGE_HEAD", detect: IsMergeInProgress},
+		{name: "cherry-pick", marker: "CHERRY_PICK_HEAD", detect: IsCherryPickInProgress},
+		{name: "sequencer", marker: "sequencer/todo", detect: IsCherryPickInProgress},
 	}
 
-	if !IsRebaseInProgress(dir) {
-		t.Fatalf("expected rebase-in-progress to be detected when .git/rebase-merge exists")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := initTestRepo(t)
+			writeOperationMarker(t, repo, tt.marker, tt.directory)
+
+			if !tt.detect(repo) {
+				t.Fatalf("%s was not detected in %s", tt.marker, repo)
+			}
+			if !AnySequencerInProgress(repo) {
+				t.Fatalf("aggregate operation detection missed %s", tt.marker)
+			}
+		})
 	}
 }
 
-func TestIsRebaseInProgressDetectsRebaseApply(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".git", "rebase-apply"), 0o755); err != nil {
-		t.Fatal(err)
+func TestAnySequencerInProgressReturnsFalseWithoutMarkers(t *testing.T) {
+	repo := initTestRepo(t)
+	if AnySequencerInProgress(repo) {
+		t.Fatal("operation reported active in repository without operation markers")
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cwd, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatal(err)
-	}
+}
 
-	if !IsRebaseInProgress(dir) {
-		t.Fatalf("expected rebase-in-progress to be detected when .git/rebase-apply exists")
-	}
+func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
+	t.Run("repository subdirectory", func(t *testing.T) {
+		repo := initTestRepo(t)
+		subdir := filepath.Join(repo, "nested", "directory")
+		if err := os.MkdirAll(subdir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeOperationMarker(t, repo, "rebase-merge", true)
+		withWorkingDir(t, subdir)
+
+		if !IsRebaseInProgress() {
+			t.Fatal("rebase was not detected from a repository subdirectory")
+		}
+	})
+
+	t.Run("linked worktree", func(t *testing.T) {
+		repo := initTestRepo(t)
+		commitTestFile(t, repo, "initial.txt", "initial")
+		linked := filepath.Join(t.TempDir(), "linked")
+		runGitForTest(t, repo, "worktree", "add", "-b", "linked", linked)
+		writeOperationMarker(t, linked, "MERGE_HEAD", false)
+
+		if !IsMergeInProgress(linked) {
+			t.Fatal("merge was not detected in a linked worktree")
+		}
+	})
+
+	t.Run("submodule", func(t *testing.T) {
+		source := initTestRepo(t)
+		commitTestFile(t, source, "initial.txt", "initial")
+		super := initTestRepo(t)
+		child := filepath.Join(super, "modules", "child")
+		runGitForTest(t, super, "-c", "protocol.file.allow=always", "submodule", "add", source, "modules/child")
+		writeOperationMarker(t, child, "CHERRY_PICK_HEAD", false)
+
+		if !IsCherryPickInProgress(child) {
+			t.Fatal("cherry-pick was not detected in a submodule")
+		}
+	})
+
+	t.Run("separate git directory", func(t *testing.T) {
+		parent := t.TempDir()
+		worktree := filepath.Join(parent, "worktree")
+		gitDir := filepath.Join(parent, "metadata")
+		runGitForTest(t, parent, "init", "-b", "main", "--separate-git-dir", gitDir, worktree)
+		writeOperationMarker(t, worktree, "sequencer/todo", false)
+
+		if !IsCherryPickInProgress(worktree) {
+			t.Fatal("sequencer was not detected with a separate Git directory")
+		}
+	})
 }
 
 func TestForceUpdateBranchCreatesMissingBranch(t *testing.T) {
@@ -236,6 +283,32 @@ func runGitForTest(t *testing.T, repo string, args ...string) {
 	cmd := append([]string{"git"}, args...)
 	if _, err := shell.Output(cmd, shell.RunOpts{Dir: repo}); err != nil {
 		t.Fatalf("%v: %v", cmd, err)
+	}
+}
+
+func writeOperationMarker(t *testing.T, repo, marker string, directory bool) {
+	t.Helper()
+	path, err := shell.Output(
+		[]string{"git", "rev-parse", "--git-path", marker},
+		shell.RunOpts{Dir: repo},
+	)
+	if err != nil {
+		t.Fatalf("resolve Git path %s: %v", marker, err)
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(repo, path)
+	}
+	if directory {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("create operation directory %s: %v", path, err)
+		}
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create operation marker parent: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("test operation marker\n"), 0o644); err != nil {
+		t.Fatalf("write operation marker %s: %v", path, err)
 	}
 }
 

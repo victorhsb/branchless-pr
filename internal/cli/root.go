@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -72,7 +73,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 		Version:       Version(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			policy := invocation.PolicyFor(cmd.Name(), commandInSubtree(cmd, "agent"), commandInSubtree(cmd, "config"))
 			if policy.AgentOnly {
 				cmd.SetContext(newContextFromApp(&AppContext{Config: cfg}))
@@ -163,16 +164,26 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			}
 
 			// Stash (submit/export only, before clean check). Skipped in dry-run
-			// mode because stash save/pop mutates local Git state.
+			// mode because stash save/restore mutates local Git state.
 			if policy.UsesStash && flagStash {
 				dryRun, _ := cmd.Flags().GetBool("dry-run")
 				if !dryRun {
-					stashed, err := git.StashSave("stack-pr auto-stash")
+					stash, err := git.StashSave("stack-pr auto-stash")
 					if err != nil {
 						return fmt.Errorf("failed to stash changes: %w", err)
 					}
-					appCtx.StashCreated = stashed
+					appCtx.AutomaticStash = stash
 				}
+			}
+			if !appCtx.AutomaticStash.IsZero() {
+				defer func() {
+					if err == nil {
+						return
+					}
+					if restoreErr := appCtx.RestoreStash(); restoreErr != nil {
+						err = errors.Join(err, fmt.Errorf("failed to restore automatic stash after initialization error: %w", restoreErr))
+					}
+				}()
 			}
 
 			// Require clean repo (all except read-only inspection/config commands)

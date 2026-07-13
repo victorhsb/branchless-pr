@@ -225,7 +225,7 @@ Options:
 -d, --draft         Create all new PRs as draft
 --draft-bitmask     Per-PR draft bitmask; chars must be 0 or 1
 --reviewer          Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer
--s, --stash         Stash uncommitted changes before submitting and pop afterward
+-s, --stash         Stash uncommitted changes before submitting and restore afterward
 ```
 
 Draft bitmask semantics:
@@ -359,13 +359,13 @@ Reviewer default precedence for submit:
 12. Check `gh` installation by invoking `gh`.
 13. Record current branch.
 14. Resolve the branch name base, which also validates current GitHub username lookup.
-15. For `submit/export --stash`: run `git stash save` and remember whether anything was stashed.
+15. For `submit/export --stash`: compare `refs/stash^{commit}` before and after `git stash push`, and remember the exact new stash commit when the ref changes. Do not infer creation from human-facing Git output.
 16. For all commands except `view`: require the repo to be clean, ignoring untracked files.
 17. Check that `REMOTE/TARGET` exists. If target is `main` and `REMOTE/master` exists, print a targeted hint for master-based repos.
 18. Deduce base if missing.
 19. Dispatch to the command implementation.
 20. On exceptions: checkout the original branch, print subprocess failure details when applicable, and re-raise.
-21. Finally, for `submit/export --stash`, pop the stash if one was actually created.
+21. Finally, for `submit/export --stash`, apply the exact recorded automatic stash and drop only its matching stash reflog entry. Preserve unrelated older or newer stashes. This cleanup covers every return after stash creation, including failures during the post-stash clean check, target validation, merge-base deduction, or command dispatch. If application conflicts, keep the automatic stash for manual recovery. If pre-run initialization and stash restoration both fail, preserve both errors.
 
 ## 9. Data model
 
@@ -465,7 +465,9 @@ Functions:
 - `get_gh_username()`: returns `git_config.username_override` when set; otherwise runs a GraphQL query through `gh api graphql` and extracts `"login":"..."` with regex.
 - `get_changed_files(base=None, repo_dir=None)`: `git diff --name-only <base or main> HEAD`, returns `Path` objects split on newline.
 - `get_changed_dirs(base=None, repo_dir=None)`: top-level directory set from changed files.
-- `is_rebase_in_progress(repo_dir=None)`: checks whether `.git/rebase-merge` or `.git/rebase-apply` exists. With a repo_dir, it uses `repo_dir / ".git"`; without one, it uses `Path(".git")`.
+- `is_rebase_in_progress(repo_dir=None)`: the Python implementation checks whether `.git/rebase-merge` or `.git/rebase-apply` exists. The Go port instead resolves each marker with `git rev-parse --git-path` in the requested repository context. This explicit port safety decision supports invocation from repository subdirectories, linked worktrees, submodules, and repositories with a separate Git directory.
+- The Go port uses the same Git-resolved-path behavior for merge (`MERGE_HEAD`), cherry-pick (`CHERRY_PICK_HEAD`), and sequencer (`sequencer/todo`) detection. Aggregate operation detection reports active when any recognized rebase, merge, cherry-pick, or sequencer marker exists.
+- The Go port's automatic stash helper compares `refs/stash^{commit}` before and after `git stash push` and returns the new stash commit identity when the ref changes. Human-facing stash output is ignored. Restoration applies that exact commit and drops only its matching stash reflog entry; unrelated older or newer stashes are preserved. Apply conflicts leave the automatic stash entry available for manual recovery.
 
 ## 12. Stack verification
 
@@ -766,8 +768,8 @@ The `required` value is `true`, `false`, or `unknown`; implementations must not 
 
 - All commands except `view`, `comments`, and `checks` require no tracked/staged/unstaged changes.
 - Untracked files (`??`) are ignored for cleanliness checks.
-- `submit/export --stash` can stash changes before the clean check and pop them afterward.
-- Submit refuses to run while `.git/rebase-merge` or `.git/rebase-apply` exists.
+- `submit/export --stash` can stash changes before the clean check and restore them afterward. Creation is detected by comparing `refs/stash` object identity, not localized command output. Once an automatic stash is created, its exact identity is retained and restoration is attempted on every subsequent success or failure path, including pre-run clean-check, target-validation, and merge-base failures before command dispatch. Only the matching automatic stash entry is removed; pre-existing or newer user stashes are preserved. Apply conflicts keep the automatic stash available for manual recovery. A pre-run restoration failure is reported alongside the original initialization failure.
+- Submit refuses to run while Git's resolved repository metadata contains a recognized rebase marker (`rebase-merge` or `rebase-apply`). Operation marker paths, including the merge and cherry-pick markers used by other safety gates, are resolved through Git so protection works from repository subdirectories, linked worktrees, submodules, and separate-Git-dir repositories.
 - On exceptions during main command dispatch, the original branch is checked out before re-raising.
 - Subprocess stdout/stderr are captured in quiet mode, which allows failures to print exit code/stdout/stderr.
 - Shell invocation is disallowed in the subprocess wrapper.

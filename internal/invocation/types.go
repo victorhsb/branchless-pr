@@ -22,12 +22,26 @@ type CommonArgs struct {
 
 // AppContext holds runtime state shared between commands.
 type AppContext struct {
-	Config       *config.Config
-	Args         CommonArgs
-	RepoRoot     string
-	Username     string
-	OrigBranch   string
-	StashCreated bool
+	Config         *config.Config
+	Args           CommonArgs
+	RepoRoot       string
+	Username       string
+	OrigBranch     string
+	AutomaticStash git.StashRef
+}
+
+// RestoreStash restores the automatic stash recorded for this invocation. A
+// successful restore consumes the recorded state so later lifecycle cleanup
+// cannot pop another stash entry.
+func (a *AppContext) RestoreStash() error {
+	if a == nil || a.AutomaticStash.IsZero() {
+		return nil
+	}
+	if err := git.StashRestore(a.AutomaticStash); err != nil {
+		return err
+	}
+	a.AutomaticStash = git.StashRef{}
+	return nil
 }
 
 // ResolveSharedArgs reads defaults from config and merges CLI overrides
@@ -126,8 +140,8 @@ func RequireCleanRepo() error {
 	return nil
 }
 
-// WithRecovery runs fn and ensures the original branch is restored (and hidden
-// stash popped) on any error or panic. It should wrap the main body of
+// WithRecovery runs fn and ensures the original branch and recorded automatic
+// stash are restored on any error or panic. It should wrap the main body of
 // commands that mutate local state.
 func WithRecovery(app *AppContext, fn func() error) (err error) {
 	defer func() {
@@ -136,9 +150,7 @@ func WithRecovery(app *AppContext, fn func() error) (err error) {
 		}
 		if err != nil {
 			_ = git.CheckoutBranch(app.OrigBranch)
-			if app.StashCreated {
-				_ = git.StashPop()
-			}
+			_ = app.RestoreStash()
 		}
 	}()
 	return fn()

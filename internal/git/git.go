@@ -179,19 +179,32 @@ func GetChangedDirs(base string, repoDir ...string) (map[string]struct{}, error)
 }
 
 // IsRebaseInProgress reports whether a rebase is currently active.
-// Per SPEC §11, with repoDir it checks repoDir/.git/rebase-*;
-// without it, it checks ./.git/rebase-*.
 func IsRebaseInProgress(repoDir ...string) bool {
-	gitDir := ".git"
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		gitDir = filepath.Join(repoDir[0], ".git")
-	}
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		if _, err := os.Stat(filepath.Join(gitDir, name)); err == nil {
+		if operationPathExists(name, repoDir...) {
 			return true
 		}
 	}
 	return false
+}
+
+// operationPathExists asks Git to resolve an operation marker in the supplied
+// repository context. Git owns this mapping because metadata may live outside
+// a worktree's .git path (for example in linked worktrees or submodules).
+func operationPathExists(marker string, repoDir ...string) bool {
+	opts := shell.RunOpts{Quiet: true}
+	if len(repoDir) > 0 && repoDir[0] != "" {
+		opts.Dir = repoDir[0]
+	}
+	path, err := shell.Output([]string{"git", "rev-parse", "--git-path", marker}, opts)
+	if err != nil || path == "" {
+		return false
+	}
+	if opts.Dir != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(opts.Dir, path)
+	}
+	_, err = os.Stat(path)
+	return err == nil
 }
 
 // MergeBase returns the common ancestor of a and b.
@@ -374,36 +387,117 @@ func RebaseWithAuthorDate(onto, branch string) error {
 	return Rebase(onto, branch, "--committer-date-is-author-date")
 }
 
-// StashSave stashes changes with an optional message.
-// It returns true if anything was actually stashed, false if working tree was clean.
-func StashSave(msg string) (bool, error) {
+// StashRef identifies one exact stash commit. Its zero value means that no
+// stash was created.
+type StashRef struct {
+	OID string
+}
+
+// IsZero reports whether the reference identifies no stash.
+func (s StashRef) IsZero() bool { return s.OID == "" }
+
+// StashSave stashes tracked changes with an optional message and returns the
+// exact created stash identity. Creation is detected from refs/stash rather
+// than localized command output.
+func StashSave(msg string) (StashRef, error) {
 	if msg == "" {
 		msg = "stack-pr auto-stash"
 	}
-	out, _, err := shell.Run(
-		[]string{"git", "stash", "save", msg},
-		shell.RunOpts{Quiet: true, Check: false},
+	before, err := stashHead()
+	if err != nil {
+		return StashRef{}, err
+	}
+	_, _, err = shell.Run(
+		[]string{"git", "stash", "push", "-m", msg},
+		shell.RunOpts{Quiet: true},
 	)
 	if err != nil {
-		return false, &Error{Op: "stash_save", Err: err}
+		return StashRef{}, &Error{Op: "stash_save", Err: err}
 	}
-	// "No local changes to save" means nothing was stashed.
-	if strings.Contains(string(out), "No local changes to save") {
-		return false, nil
+	after, err := stashHead()
+	if err != nil {
+		return StashRef{}, err
 	}
-	return true, nil
+	if after == before {
+		return StashRef{}, nil
+	}
+	if after == "" {
+		return StashRef{}, &Error{Op: "stash_save", Err: fmt.Errorf("refs/stash disappeared after Git reported success")}
+	}
+	return StashRef{OID: after}, nil
 }
 
-// StashPop pops the most recent stash entry.
-func StashPop() error {
+// StashRestore applies one exact stash commit and drops only its matching
+// reflog entry. Apply failures leave the stash available for manual recovery.
+func StashRestore(ref StashRef) error {
+	if ref.IsZero() {
+		return nil
+	}
+	if _, err := stashSelector(ref); err != nil {
+		return err
+	}
 	_, _, err := shell.Run(
-		[]string{"git", "stash", "pop"},
+		[]string{"git", "stash", "apply", "--quiet", ref.OID},
+		shell.RunOpts{Quiet: true},
+	)
+	if err != nil {
+		return &Error{
+			Op:  "stash_apply",
+			Err: fmt.Errorf("automatic stash %s could not be applied and was kept for manual recovery: %w", ref.OID, err),
+		}
+	}
+	selector, err := stashSelector(ref)
+	if err != nil {
+		return &Error{
+			Op:  "stash_drop",
+			Err: fmt.Errorf("automatic stash %s was applied but its reflog entry could not be found for removal: %w", ref.OID, err),
+		}
+	}
+	_, _, err = shell.Run(
+		[]string{"git", "stash", "drop", "--quiet", selector},
+		shell.RunOpts{Quiet: true},
+	)
+	if err != nil {
+		return &Error{
+			Op:  "stash_drop",
+			Err: fmt.Errorf("automatic stash %s was applied but could not be removed; drop %s manually: %w", ref.OID, selector, err),
+		}
+	}
+	return nil
+}
+
+func stashHead() (string, error) {
+	out, _, err := shell.Run(
+		[]string{"git", "rev-parse", "--verify", "--quiet", "refs/stash^{commit}"},
+		shell.RunOpts{Quiet: true},
+	)
+	if err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == 1 {
+		return "", nil
+	}
+	return "", &Error{Op: "stash_ref", Err: err}
+}
+
+func stashSelector(ref StashRef) (string, error) {
+	out, err := shell.Output(
+		[]string{"git", "stash", "list", "--format=%H%x00%gd"},
 		shell.RunOpts{},
 	)
 	if err != nil {
-		return &Error{Op: "stash_pop", Err: err}
+		return "", &Error{Op: "stash_list", Err: err}
 	}
-	return nil
+	for _, line := range strings.Split(out, "\n") {
+		oid, selector, ok := strings.Cut(line, "\x00")
+		if ok && oid == ref.OID && selector != "" {
+			return selector, nil
+		}
+	}
+	return "", &Error{
+		Op:  "stash_find",
+		Err: fmt.Errorf("automatic stash %s is no longer present; no other stash was changed", ref.OID),
+	}
 }
 
 // RevParse resolves a ref to its full 40-char SHA.
@@ -488,22 +582,13 @@ func parseRepoSlug(url string) (owner, repo string, err error) {
 
 // IsMergeInProgress reports whether a merge is currently active.
 func IsMergeInProgress(repoDir ...string) bool {
-	gitDir := ".git"
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		gitDir = filepath.Join(repoDir[0], ".git")
-	}
-	_, err := os.Stat(filepath.Join(gitDir, "MERGE_HEAD"))
-	return err == nil
+	return operationPathExists("MERGE_HEAD", repoDir...)
 }
 
 // IsCherryPickInProgress reports whether a cherry-pick is currently active.
 func IsCherryPickInProgress(repoDir ...string) bool {
-	gitDir := ".git"
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		gitDir = filepath.Join(repoDir[0], ".git")
-	}
 	for _, name := range []string{"sequencer/todo", "CHERRY_PICK_HEAD"} {
-		if _, err := os.Stat(filepath.Join(gitDir, name)); err == nil {
+		if operationPathExists(name, repoDir...) {
 			return true
 		}
 	}
