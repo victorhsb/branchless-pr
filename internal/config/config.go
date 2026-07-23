@@ -162,6 +162,29 @@ func ParseConfigArg(arg string) (section, key, value string, err error) {
 	return section, key, value, nil
 }
 
+// NativeStacksMode represents the supported values for github.native_stacks.
+type NativeStacksMode string
+
+const (
+	NativeStacksOff      NativeStacksMode = "off"
+	NativeStacksAuto     NativeStacksMode = "auto"
+	NativeStacksRequired NativeStacksMode = "required"
+)
+
+// ParseNativeStacksMode validates a raw github.native_stacks value.
+func ParseNativeStacksMode(raw string) (NativeStacksMode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "off":
+		return NativeStacksOff, nil
+	case "auto":
+		return NativeStacksAuto, nil
+	case "required":
+		return NativeStacksRequired, nil
+	default:
+		return "", fmt.Errorf("invalid github.native_stacks value %q: expected off, auto, or required", raw)
+	}
+}
+
 // Defaults returns a Config pre-populated with all documented defaults.
 func Defaults() *Config {
 	c := &Config{sections: make(map[string]map[string]string)}
@@ -176,6 +199,7 @@ func Defaults() *Config {
 	c.Set("repo", "reviewer", "")
 	c.Set("repo", "branch_name_template", "$USERNAME/stack")
 	c.Set("submit", "experimental_engine", "false")
+	c.Set("github", "native_stacks", string(NativeStacksOff))
 	c.Set("comments", "ignore_authors", "")
 	c.Set("land", "style", "bottom-only")
 	return c
@@ -278,13 +302,21 @@ reviewer =
 # Enable the experimental optimized submit/export engine
 experimental_engine = false
 
+[github]
+# GitHub native Stacked PR integration (private preview).
+# Valid values:
+#   off      - Do not use GitHub native stacks (default, preserves legacy behavior).
+#   auto     - Use native stacks when available and eligible; fall back to legacy
+#              behavior when the feature or required gh-stack extension is missing.
+#   required - Require native stacks; fail if they are unavailable, ineligible, or
+#              the required gh-stack extension is missing.
+# Enabling native stacks changes GitHub CI, rules, review, and landing behavior.
+# Native Stack writes require the github/gh-stack extension.
+native_stacks = off
+
 [comments]
 # Comma-separated list of GitHub usernames whose review comments to ignore
 ignore_authors =
-
-[submit]
-# Enable the experimental submit/export engine that skips redundant work
-experimental_engine = false
 
 [land]
 # Landing style: "bottom-only" squash-merges only the bottom PR and rebases the

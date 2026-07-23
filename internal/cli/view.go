@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
@@ -71,13 +73,26 @@ func runView(app *AppContext, format string) error {
 	// 7. Set base branches.
 	st.AssignBases(app.Args.Target)
 
-	// 8. Print stack newest-to-oldest.
+	// 8. Load native-stack membership in auto/required mode.
+	mode, _ := config.ParseNativeStacksMode(app.Config.Get("github", "native_stacks"))
+	if mode != config.NativeStacksOff {
+		if err := loadNativeMembership(app, st, mode); err != nil {
+			// In auto mode, surface as a warning but still render the stack.
+			if mode == config.NativeStacksAuto {
+				fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+			} else {
+				return err
+			}
+		}
+	}
+
+	// 9. Print stack newest-to-oldest.
 	if err := writeViewStack(os.Stdout, st, format, app.Args.Hyperlinks); err != nil {
 		return err
 	}
 	fmt.Println()
 
-	// 9. Print tips.
+	// 10. Print tips.
 	if app.Args.ShowTips {
 		printViewTips(st)
 	}
@@ -125,6 +140,62 @@ func maybeWarnBaseBehind(base, remoteTarget, head string) (string, error) {
 	return fmt.Sprintf("Warning: local base is behind %s.\n"+
 		"Consider updating it before exporting with:\n"+
 		"  git rebase %s %s", remoteTarget, remoteTarget, base), nil
+}
+
+func loadNativeMembership(app *AppContext, st stack.Stack, mode config.NativeStacksMode) error {
+	prNumbers := make([]int, 0, len(st))
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		n, err := e.PRNumber()
+		if err != nil {
+			return err
+		}
+		prNumbers = append(prNumbers, n)
+	}
+	if len(prNumbers) == 0 {
+		return nil
+	}
+
+	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	if err != nil {
+		return fmt.Errorf("cannot resolve owner/repo for native membership: %w", err)
+	}
+
+	client := nativestacks.NewAPIClient(owner, repo)
+	memberships, _, err := client.LoadMembership(prNumbers)
+	if err != nil {
+		if nativestacks.IsFeatureUnavailable(err) {
+			return &nativestacks.FeatureUnavailable{Msg: "native Stacks is unavailable for this repository"}
+		}
+		return fmt.Errorf("cannot load native membership: %w", err)
+	}
+
+	// Track stacks seen for drift reporting.
+	seenStacks := make(map[int]bool)
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		n, _ := e.PRNumber()
+		m, ok := memberships[n]
+		if !ok || m == nil || !m.IsStacked() {
+			continue
+		}
+		e.NativeStackNumber = m.StackNumber
+		e.NativeStackPosition = m.Position
+		e.NativeStackSize = m.StackSize
+		e.NativeStackBase = m.StackBase
+		seenStacks[*m.StackNumber] = true
+	}
+
+	// Drift detection: warn if PRs are split across multiple stacks or if order
+	// does not match a single contiguous stack prefix.
+	if len(seenStacks) > 1 {
+		fmt.Fprintf(os.Stderr, "Warning: native membership drift detected: stack entries belong to multiple native Stacks\n")
+	}
+	return nil
 }
 
 func printViewTips(st stack.Stack) {

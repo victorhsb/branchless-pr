@@ -141,16 +141,20 @@ func TestEntryMarshalJSONProducesFlatShape(t *testing.T) {
 	}
 
 	want := map[string]any{
-		"commit":       "0123456789abcdef0123456789abcdef01234567",
-		"short_sha":    "01234567",
-		"title":        "Add JSON output",
-		"author":       "Alice Example <alice@example.com>",
-		"author_name":  "Alice Example",
-		"author_email": "alice@example.com",
-		"pr_url":       "",
-		"pr_number":    float64(0),
-		"head_branch":  "alice/stack/1",
-		"base_branch":  "main",
+		"commit":                "0123456789abcdef0123456789abcdef01234567",
+		"short_sha":             "01234567",
+		"title":                 "Add JSON output",
+		"author":                "Alice Example <alice@example.com>",
+		"author_name":           "Alice Example",
+		"author_email":          "alice@example.com",
+		"pr_url":                "",
+		"pr_number":             float64(0),
+		"head_branch":           "alice/stack/1",
+		"base_branch":           "main",
+		"github_stack_number":   nil,
+		"github_stack_position": float64(0),
+		"github_stack_size":     float64(0),
+		"github_stack_base":     "",
 	}
 	if len(payload) != len(want) {
 		t.Fatalf("MarshalJSON fields = %d, want %d", len(payload), len(want))

@@ -9,13 +9,14 @@ Use submit only after the user requests publishing or updating PRs, or explicitl
 ## Commands
 
 - `stack-pr submit --dry-run` — Preview the PR create/update plan without local Git mutations, pushes, or GitHub writes. Side effects: no.
-- `stack-pr submit` — Create or update GitHub PRs for each commit in the stack. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr submit` — Create or update GitHub PRs for each commit in the stack; reconcile with a GitHub native Stack when configured. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - May rebase local commits when updating the base.
   - Creates or updates generated local branches.
-  - Force-pushes generated stack branches.
+  - Force-pushes generated stack branches (force-with-lease when native stacks are enabled).
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
+  - When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.
 
 ## Rules
 

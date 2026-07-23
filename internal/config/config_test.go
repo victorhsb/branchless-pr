@@ -84,6 +84,38 @@ func TestDefaultsAndMerge(t *testing.T) {
 	if got := c.Get("comments", "ignore_authors"); got != "" {
 		t.Errorf("comments.ignore_authors default = %q, want empty", got)
 	}
+	if got := c.Get("github", "native_stacks"); got != "off" {
+		t.Errorf("github.native_stacks default = %q, want off", got)
+	}
+}
+
+func TestParseNativeStacksMode(t *testing.T) {
+	cases := []struct {
+		in   string
+		want NativeStacksMode
+		err  bool
+	}{
+		{"", NativeStacksOff, false},
+		{"off", NativeStacksOff, false},
+		{"OFF", NativeStacksOff, false},
+		{"auto", NativeStacksAuto, false},
+		{"Auto", NativeStacksAuto, false},
+		{"required", NativeStacksRequired, false},
+		{"bogus", "", true},
+	}
+	for _, c := range cases {
+		got, err := ParseNativeStacksMode(c.in)
+		if (err != nil) != c.err {
+			t.Errorf("ParseNativeStacksMode(%q) err = %v, want err=%v", c.in, err, c.err)
+			continue
+		}
+		if err != nil {
+			continue
+		}
+		if got != c.want {
+			t.Errorf("ParseNativeStacksMode(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
 }
 
 func TestWriteDefaultsMatchesDefaults(t *testing.T) {

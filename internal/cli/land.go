@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -52,24 +55,29 @@ func effectiveLandStyle(app *AppContext, wholeStackFlag bool) string {
 }
 
 func landImpl(app *AppContext, style string) error {
-	// 3. Optionally fast-forward local base.
+	// 3. Native landing safety preflight.
+	if err := nativeLandPreflight(app, style); err != nil {
+		return err
+	}
+
+	// 4. Optionally fast-forward local base.
 	if err := maybeRebaseBase(app); err != nil {
 		return err
 	}
 
-	// 4. Discover stack.
+	// 5. Discover stack.
 	st, err := stack.Discover(app.Args.Base, app.Args.Head)
 	if err != nil {
 		return err
 	}
 
-	// 5. Empty stack.
+	// 6. Empty stack.
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
 		return nil
 	}
 
-	// 6. Read metadata, assign bases, print stack.
+	// 7. Read metadata, assign bases, print stack.
 	for _, e := range st {
 		e.ReadMetadata()
 	}
@@ -78,16 +86,103 @@ func landImpl(app *AppContext, style string) error {
 	st.PrintStack(app.Args.Hyperlinks, true)
 	fmt.Println()
 
-	// 7. Verify the stack against GitHub with check_base=true.
+	// 8. Verify the stack against GitHub with check_base=true.
 	if err := stack.Verify(st, true); err != nil {
 		return err
 	}
 
-	// 8. Dispatch to the selected landing strategy.
+	// 9. Dispatch to the selected landing strategy.
 	if style == "whole-stack" {
 		return landWholeStack(app, st)
 	}
 	return landBottomOnly(app, st)
+}
+
+func nativeLandPreflight(app *AppContext, style string) error {
+	mode, err := config.ParseNativeStacksMode(app.Config.Get("github", "native_stacks"))
+	if err != nil {
+		return err
+	}
+	if mode == config.NativeStacksOff {
+		return nil
+	}
+
+	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	if err != nil {
+		return err
+	}
+	if st.IsEmpty() {
+		return nil
+	}
+	for _, e := range st {
+		e.ReadMetadata()
+	}
+
+	prNumbers := make([]int, 0, len(st))
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		n, err := e.PRNumber()
+		if err != nil {
+			return err
+		}
+		prNumbers = append(prNumbers, n)
+	}
+	if len(prNumbers) < 2 {
+		// Single PR stacks are standalone in every mode.
+		return nil
+	}
+
+	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	if err != nil {
+		return fmt.Errorf("cannot resolve owner/repo for native landing check: %w", err)
+	}
+
+	client := nativestacks.NewAPIClient(owner, repo)
+	memberships, stacks, err := client.LoadMembership(prNumbers)
+	if err != nil {
+		if nativestacks.IsFeatureUnavailable(err) {
+			if mode == config.NativeStacksAuto {
+				fmt.Fprintln(os.Stderr, "Warning: native Stacks is unavailable; using legacy landing.")
+				return nil
+			}
+		}
+		return fmt.Errorf("cannot load native membership for landing: %w", err)
+	}
+
+	result := nativestacks.Classify(prNumbers, memberships, stacks)
+	switch result.Kind {
+	case nativestacks.ActionNoop:
+		return nativeLandRefusal(st, style)
+	case nativestacks.ActionConflict:
+		return fmt.Errorf("native membership conflict blocks landing: %s", result.Conflict)
+	case nativestacks.ActionCreate:
+		if mode == config.NativeStacksAuto {
+			return nil // legacy landing for unstacked eligible stack
+		}
+		return fmt.Errorf("native Stacks is required but the stack is not yet linked; submit first to create a native Stack")
+	case nativestacks.ActionAppend:
+		// Append means some PRs are already in a native Stack, so refuse landing.
+		return nativeLandRefusal(st, style)
+	case nativestacks.ActionIneligible:
+		return nil // legacy landing for ineligible stack
+	default:
+		return nil
+	}
+}
+
+func nativeLandRefusal(st stack.Stack, style string) error {
+	var prURL string
+	if style == "whole-stack" {
+		prURL = st.Top().PR()
+	} else {
+		prURL = st.Bottom().PR()
+	}
+	return fmt.Errorf("ERROR: landing is not supported for stacks linked to a GitHub native Stack.\n"+
+		"Initiate the merge in the GitHub UI: %s\n"+
+		"branchless-pr does not yet synchronize GitHub server-side rebases or merges with the local commit stack.",
+		prURL)
 }
 
 func landBottomOnly(app *AppContext, st stack.Stack) error {

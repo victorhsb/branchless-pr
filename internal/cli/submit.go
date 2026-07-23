@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -17,6 +18,7 @@ type submitOptions struct {
 	KeepBody     bool
 	DraftBitmask string
 	Reviewer     string
+	Receipt      string
 }
 
 func submitCmd() *cobra.Command {
@@ -47,11 +49,17 @@ Use --dry-run to preview the planned actions without applying any local Git or G
 	cmd.Flags().StringVar(&opts.Reviewer, "reviewer", "", "Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer")
 	cmd.Flags().BoolVarP(&flagStash, "stash", "s", false, "Stash uncommitted changes before submitting and restore afterward")
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Preview submit/export actions without applying local Git or GitHub changes")
+	cmd.Flags().StringVar(&opts.Receipt, "receipt", "", "Emit a submit operation receipt to a file, '-', or 'off'")
 
 	return cmd
 }
 
 func submitImpl(app *AppContext, opts submitOptions) (err error) {
+	receiptDest := effectiveReceiptDestination(app.Config, opts.Receipt)
+	if opts.DryRun && receiptDest != "" && receiptDest != "off" {
+		return fmt.Errorf("operation receipts are only available for real submit/export executions")
+	}
+
 	defer func() {
 		if err == nil {
 			if perr := app.RestoreStash(); perr != nil {
@@ -72,16 +80,85 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 		return nil
 	}
 
-	experimentalEngine := useExperimentalSubmitEngine(app)
+	mode, err := nativeMode(app.Config)
+	if err != nil {
+		return err
+	}
+	preflight, err := nativeSubmitPreflight(app, st, mode)
+	if err != nil {
+		return err
+	}
+
 	if opts.DryRun {
 		printDryRunPlan(st, needsMeta, isDraft)
+		printNativeDryRunPlan(preflight)
 		return nil
 	}
 
-	if experimentalEngine {
-		return applyMutationsOptimized(app, st, needsMeta, isDraft, opts)
+	// Capture observed remote branch OIDs for force-with-lease when native mode
+	// is active.
+	var leases map[string]string
+	if preflight != nil && preflight.enabled {
+		heads := make([]string, len(st))
+		for i, e := range st {
+			heads[i] = e.Head()
+		}
+		leases, err = git.ResolveRemoteRefs(app.Args.Remote, heads...)
+		if err != nil {
+			return fmt.Errorf("cannot capture remote branch heads for native push lease: %w", err)
+		}
 	}
-	return applyMutations(app, st, needsMeta, isDraft, opts)
+
+	experimentalEngine := useExperimentalSubmitEngine(app)
+	if experimentalEngine {
+		err = applyMutationsOptimized(app, st, needsMeta, isDraft, opts, leases)
+	} else {
+		err = applyMutations(app, st, needsMeta, isDraft, opts, leases)
+	}
+	if err != nil {
+		return err
+	}
+
+	// Post-submit native reconciliation.
+	var nativeResult *nativestacks.Result
+	if preflight != nil && preflight.enabled {
+		// Re-classify with final PR numbers (new PRs now have URLs/numbers).
+		finalPRs := localPRNumbers(st)
+		memberships, stacks, merr := preflight.client.LoadMembership(finalPRs)
+		if merr != nil {
+			return fmt.Errorf("native reconciliation failed: cannot reload membership: %w", merr)
+		}
+		preflight.plan = nativestacks.Classify(finalPRs, memberships, stacks)
+		var rerr error
+		nativeResult, rerr = reconcileNativeStack(preflight)
+		if rerr != nil {
+			return fmt.Errorf("ERROR: earlier PR/branch updates may have completed, but native reconciliation failed: %w", rerr)
+		}
+	}
+
+	if receiptDest != "" && receiptDest != "off" {
+		receipt := newSubmitReceipt(app, "stack-pr submit", st)
+		if preflight != nil && preflight.enabled && nativeResult != nil {
+			var prs []int
+			if nativeResult.IsWriteAction() {
+				prs = nativeResult.SuffixPRs
+				if nativeResult.Kind == nativestacks.ActionCreate {
+					prs = nativeResult.LocalPRs
+				}
+			}
+			receipt.RecordNativeStack(nativestacks.ReceiptOperation{
+				Kind:        nativeResult.Kind,
+				StackNumber: nativeResult.StackNumber,
+				PRs:         prs,
+			})
+		}
+		receipt.Finalize()
+		if werr := receipt.Write(receiptDest); werr != nil {
+			return fmt.Errorf("failed to write receipt: %w", werr)
+		}
+	}
+
+	return nil
 }
 
 const experimentalSubmitEngineEnv = "STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE"
@@ -152,7 +229,7 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 	return st, needsMeta, isDraft, nil
 }
 
-func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions) error {
+func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string) error {
 	if err := initializeStackBranches(st); err != nil {
 		return err
 	}
@@ -171,7 +248,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	for i, e := range st {
 		heads[i] = e.Head()
 	}
-	if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push branches: %w", err)
 	}
 
@@ -207,7 +284,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		return err
 	}
 
-	if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push amended branches: %w", err)
 	}
 
@@ -254,7 +331,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	return nil
 }
 
-func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions) error {
+func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string) error {
 	if err := initializeStackBranches(st); err != nil {
 		return err
 	}
@@ -277,7 +354,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	for i, e := range st {
 		heads[i] = e.Head()
 	}
-	if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push branches: %w", err)
 	}
 
@@ -325,7 +402,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		return err
 	}
 	if changedTips {
-		if err := git.ForcePush(app.Args.Remote, heads...); err != nil {
+		if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
 			return fmt.Errorf("ERROR: Cannot push amended branches: %w", err)
 		}
 	}

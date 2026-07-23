@@ -67,6 +67,32 @@ func TestBranchlessStackHeadReturnsTopCommit(t *testing.T) {
 	}
 }
 
+func TestResolveRemoteRefs(t *testing.T) {
+	bin := t.TempDir()
+	fakeGit := filepath.Join(bin, "git")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = rev-parse ] && [ \"$2\" = origin/foo ]; then\n" +
+		"  printf 'abc123\\n'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exit 1\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	got, err := ResolveRemoteRefs("origin", "foo", "bar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["foo"] != "abc123" {
+		t.Errorf("foo = %q, want abc123", got["foo"])
+	}
+	if _, ok := got["bar"]; ok {
+		t.Errorf("bar should be absent")
+	}
+}
+
 func TestBranchlessStackHeadReturnsFalseWhenUnavailable(t *testing.T) {
 	bin := t.TempDir()
 	fakeGit := filepath.Join(bin, "git")

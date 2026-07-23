@@ -2,10 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
@@ -24,6 +27,98 @@ func abandonCmd() *cobra.Command {
 	}
 }
 
+func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
+	mode, err := config.ParseNativeStacksMode(app.Config.Get("github", "native_stacks"))
+	if err != nil {
+		return err
+	}
+	if mode == config.NativeStacksOff {
+		return nil
+	}
+
+	prNumbers := make([]int, 0, len(st))
+	for _, e := range st {
+		if !e.HasPR() {
+			continue
+		}
+		n, err := e.PRNumber()
+		if err != nil {
+			return err
+		}
+		prNumbers = append(prNumbers, n)
+	}
+	if len(prNumbers) < 2 {
+		// Single PR stacks are standalone; legacy cleanup is safe.
+		return nil
+	}
+
+	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	if err != nil {
+		return fmt.Errorf("cannot resolve owner/repo for native abandon check: %w", err)
+	}
+
+	client := nativestacks.NewAPIClient(owner, repo)
+	memberships, stacks, err := client.LoadMembership(prNumbers)
+	if err != nil {
+		if nativestacks.IsFeatureUnavailable(err) {
+			if mode == config.NativeStacksAuto {
+				fmt.Fprintln(os.Stderr, "Warning: native Stacks is unavailable; using legacy abandon.")
+				return nil
+			}
+		}
+		return fmt.Errorf("cannot load native membership for abandon: %w", err)
+	}
+
+	result := nativestacks.Classify(prNumbers, memberships, stacks)
+	switch result.Kind {
+	case nativestacks.ActionNoop:
+		// Exact native membership: unstack before deleting remote branches.
+		ext, err := nativestacks.FindExtension()
+		if err != nil {
+			return fmt.Errorf("cannot check gh-stack extension: %w", err)
+		}
+		if !ext.Installed {
+			return &nativestacks.ErrExtensionMissing{Min: nativestacks.MinimumExtensionVersion}
+		}
+		if err := nativestacks.ValidateExtensionVersion(ext.Version, nativestacks.MinimumExtensionVersion); err != nil {
+			return err
+		}
+		if err := nativestacks.Unstack(result.StackNumber); err != nil {
+			return fmt.Errorf("failed to unstack native Stack #%d: %w", result.StackNumber, err)
+		}
+		// Verify unstack result.
+		s, err := client.GetStack(result.StackNumber)
+		if err != nil && !nativestacks.IsFeatureUnavailable(err) {
+			return fmt.Errorf("cannot verify native unstack result: %w", err)
+		}
+		if s != nil && len(s.PRs) > 0 {
+			for _, pr := range s.PRs {
+				// If an unmerged local PR remains stacked, stop before branch deletion.
+				if pr.State != "MERGED" {
+					for _, n := range prNumbers {
+						if pr.Number == n {
+							return fmt.Errorf("native unstack left unmerged PR #%d stacked; stopping before remote branch deletion", n)
+						}
+					}
+				}
+			}
+		}
+		return nil
+	case nativestacks.ActionCreate:
+		if mode == config.NativeStacksAuto {
+			return nil // legacy cleanup for unstacked PRs
+		}
+		return fmt.Errorf("native Stacks is required but the stack is not linked; cannot abandon safely")
+	case nativestacks.ActionConflict:
+		return fmt.Errorf("native membership conflict blocks abandon: %s", result.Conflict)
+	case nativestacks.ActionAppend:
+		// Partial membership means an existing Stack would be left inconsistent.
+		return fmt.Errorf("native membership conflict blocks abandon: %s", result.Conflict)
+	default:
+		return nil
+	}
+}
+
 func abandonImpl(app *AppContext) error {
 	// 2. Discover stack.
 	st, err := stack.Discover(app.Args.Base, app.Args.Head)
@@ -35,6 +130,11 @@ func abandonImpl(app *AppContext) error {
 	if st.IsEmpty() {
 		fmt.Println("Empty stack!")
 		return nil
+	}
+
+	// 4. Native unstack preflight before any local mutation.
+	if err := nativeAbandonPreflight(app, st); err != nil {
+		return err
 	}
 
 	// 5. Read metadata; for entries lacking heads, assign new ones from the template.

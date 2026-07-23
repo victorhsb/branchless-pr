@@ -216,7 +216,7 @@ These options are shared by `submit`, `export`, `view`, `comments`, `checks`, `l
 
 #### `stack-pr submit`
 
-Creates or updates the stack of PRs. Alias: `stack-pr export`.
+Creates or updates the stack of PRs. Alias: `stack-pr export`. When `github.native_stacks` is `auto` or `required` and the repository supports GitHub native Stacked PRs, the command reconciles the final PR chain with a GitHub native Stack after ordinary PR and branch publication completes. Native Stack writes require the `github/gh-stack` extension.
 
 Options:
 
@@ -226,6 +226,7 @@ Options:
 --draft-bitmask     Per-PR draft bitmask; chars must be 0 or 1
 --reviewer          Reviewer list; default from STACK_PR_DEFAULT_REVIEWER or config repo.reviewer
 -s, --stash         Stash uncommitted changes before submitting and restore afterward
+--receipt           Emit a JSON operation receipt to a file, '-', or 'off'
 ```
 
 Draft bitmask semantics:
@@ -237,7 +238,7 @@ Draft bitmask semantics:
 
 #### `stack-pr view`
 
-Safely inspects the current stack. It does not modify commits or push branches, but it may fetch/prune the remote while assigning hypothetical head branches for display.
+Safely inspects the current stack. It does not modify commits or push branches, but it may fetch/prune the remote while assigning hypothetical head branches for display. When native stacks are enabled, `view` reads GitHub native Stack membership and includes stack number, position, size, and base in JSON output.
 
 #### `stack-pr comments`
 
@@ -276,11 +277,15 @@ Lands stacked PRs into the target branch. Two styles are supported:
 - `bottom-only` (default): squash-merges the bottom-most PR, then rebases the remaining stack branches onto the latest remote target.
 - `whole-stack`: retargets the tip PR's base to the target branch and queues a GitHub rebase auto-merge so the entire stack lands in a single operation. Requires that the repository allows rebase merges and that the target branch has GitHub merge queue enabled; otherwise the command exits with an error and no mutation.
 
+When `github.native_stacks` is `auto` or `required`, `land` loads GitHub native Stack membership before mutating anything. If the local stack exactly matches a native Stack, the command refuses to land and directs the user to the relevant GitHub PR in the UI, because branchless-pr does not yet synchronize GitHub server-side rebases or merges with the local commit stack. Legacy landing is preserved when native integration is disabled, unavailable, or every PR is unstacked.
+
 The configured style is read from `land.style`. The `--whole-stack` flag overrides the configured style for a single invocation. This command is only registered when `land.style` is not `disable`. If `land.style=disable`, the command is unavailable.
 
 #### `stack-pr abandon`
 
 Removes stack metadata from commits, deletes local generated branches, and deletes matching remote generated branches. The current implementation does not call `gh pr close`; although README text describes closing PRs, the code only strips metadata and deletes branches.
+
+When native stacks are enabled, `abandon` first loads GitHub native Stack membership. If the local PR sequence exactly matches a native Stack, it runs `gh stack unstack <stack-number>` and verifies through the REST API that no unmerged local PR remains stacked before deleting generated remote branches.
 
 #### `stack-pr config init`
 
@@ -328,9 +333,14 @@ branch_name_template=$USERNAME/stack
 [comments]
 ignore_authors=ci-bot,release-bot
 
+[github]
+native_stacks=off|auto|required
+
 [land]
 style=bottom-only|whole-stack|disable
 ```
+
+`github.native_stacks` controls GitHub native Stacked PR integration. The default is `off`. `auto` enables native reconciliation when the repository supports it and the required `github/gh-stack` extension is installed; it falls back to legacy behavior when native Stacks are unavailable or ineligible. `required` fails before command-specific mutation when native Stacks are unavailable, ineligible, or the extension is missing. Native Stack writes require the `github/gh-stack` extension.
 
 The config command writes values as strings. Boolean values are later read with `ConfigParser.getboolean`.
 

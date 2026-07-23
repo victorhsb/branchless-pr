@@ -8,7 +8,7 @@ Only run it when the user explicitly wants stack-pr to stop managing the current
 
 ## Commands
 
-- `stack-pr abandon` — Remove stack metadata and delete generated stack branches. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr abandon` — Remove stack metadata and delete generated stack branches; unlinks matching GitHub native Stacks first. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Amends commits to strip stack-info metadata.
   - Rebases commits and the original branch.

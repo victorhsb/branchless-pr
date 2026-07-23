@@ -344,6 +344,40 @@ func ForcePush(remote string, refs ...string) error {
 	return nil
 }
 
+// ResolveRemoteRefs returns the current OID for each remote ref, or an empty
+// string if the ref does not exist.
+func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error) {
+	result := make(map[string]string, len(refs))
+	for _, r := range refs {
+		out, err := shell.Output([]string{"git", "rev-parse", remote + "/" + r}, shell.RunOpts{Quiet: true, Check: false})
+		if err != nil {
+			continue // ref does not exist
+		}
+		result[r] = strings.TrimSpace(out)
+	}
+	return result, nil
+}
+
+// ForcePushWithLease force-pushes with atomic force-with-lease expectations.
+// leases maps branch name to expected remote OID; an empty expectation means
+// the branch must not exist.
+func ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
+	args := []string{"git", "push", "--force-with-lease", remote}
+	for _, r := range refs {
+		expect := leases[r]
+		if expect == "" {
+			args = append(args, r+":"+r)
+		} else {
+			args = append(args, fmt.Sprintf("%s:%s^%s", r, r, expect))
+		}
+	}
+	_, _, err := shell.Run(args, shell.RunOpts{})
+	if err != nil {
+		return &Error{Op: "force_push_with_lease", Err: err}
+	}
+	return nil
+}
+
 // DeleteRemoteBranches deletes branches on the remote via empty ref.
 func DeleteRemoteBranches(remote string, branches ...string) error {
 	args := []string{"git", "push", "-f", remote}

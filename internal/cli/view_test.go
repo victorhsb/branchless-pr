@@ -72,6 +72,41 @@ func TestWriteViewStackRejectsUnknownFormat(t *testing.T) {
 	}
 }
 
+func TestWriteViewStackJSONNativeFields(t *testing.T) {
+	e := newViewTestEntry("cccccccccccccccccccccccccccccccccccccccc", "native", "alice/stack/3", "alice/stack/2", "https://github.com/foo/bar/pull/99")
+	n := 5
+	e.NativeStackNumber = &n
+	e.NativeStackPosition = 2
+	e.NativeStackSize = 3
+	e.NativeStackBase = "main"
+
+	st := stack.Stack{e}
+	var out bytes.Buffer
+	if err := writeViewStack(&out, st, "json", false); err != nil {
+		t.Fatal(err)
+	}
+
+	var payload []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("json entries = %d, want 1", len(payload))
+	}
+	if got := payload[0]["github_stack_number"]; got != float64(5) {
+		t.Errorf("github_stack_number = %v, want 5", got)
+	}
+	if got := payload[0]["github_stack_position"]; got != float64(2) {
+		t.Errorf("github_stack_position = %v, want 2", got)
+	}
+	if got := payload[0]["github_stack_size"]; got != float64(3) {
+		t.Errorf("github_stack_size = %v, want 3", got)
+	}
+	if got := payload[0]["github_stack_base"]; got != "main" {
+		t.Errorf("github_stack_base = %v, want main", got)
+	}
+}
+
 func newViewTestEntry(sha, title, head, base, pr string) *stack.Entry {
 	e := &stack.Entry{
 		Commit: &stack.Header{

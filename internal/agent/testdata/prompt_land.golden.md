@@ -8,7 +8,7 @@ Only run it when the user explicitly wants to land the bottom PR in the stack.
 
 ## Commands
 
-- `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack; refuses to land stacks linked to a GitHub native Stack. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Merges the bottom pull request on GitHub.
   - Rebases and force-pushes remaining stack branches.

@@ -21,6 +21,14 @@ type Entry struct {
 	headBranch string // generated branch name
 	baseBranch string // target branch for PR
 	IsTmpDraft bool   // true if the PR was temporarily made draft during submit
+
+	// NativeStack* hold GitHub native Stack membership when populated by the
+	// view command. They are nil/empty when native integration is disabled or
+	// the entry is not a member of a native Stack.
+	NativeStackNumber   *int
+	NativeStackPosition int
+	NativeStackSize     int
+	NativeStackBase     string
 }
 
 // MarshalJSON emits the flat representation consumed by machine-readable views.
@@ -35,29 +43,37 @@ func (e *Entry) MarshalJSON() ([]byte, error) {
 	}
 
 	type jsonEntry struct {
-		Commit      string `json:"commit"`
-		ShortSHA    string `json:"short_sha"`
-		Title       string `json:"title"`
-		Author      string `json:"author"`
-		AuthorName  string `json:"author_name"`
-		AuthorEmail string `json:"author_email"`
-		PRURL       string `json:"pr_url"`
-		PRNumber    int    `json:"pr_number"`
-		HeadBranch  string `json:"head_branch"`
-		BaseBranch  string `json:"base_branch"`
+		Commit              string `json:"commit"`
+		ShortSHA            string `json:"short_sha"`
+		Title               string `json:"title"`
+		Author              string `json:"author"`
+		AuthorName          string `json:"author_name"`
+		AuthorEmail         string `json:"author_email"`
+		PRURL               string `json:"pr_url"`
+		PRNumber            int    `json:"pr_number"`
+		HeadBranch          string `json:"head_branch"`
+		BaseBranch          string `json:"base_branch"`
+		GitHubStackNumber   *int   `json:"github_stack_number"`
+		GitHubStackPosition int    `json:"github_stack_position"`
+		GitHubStackSize     int    `json:"github_stack_size"`
+		GitHubStackBase     string `json:"github_stack_base"`
 	}
 
 	return json.Marshal(jsonEntry{
-		Commit:      e.Commit.SHA,
-		ShortSHA:    e.Commit.ShortSHA(),
-		Title:       e.Commit.Title,
-		Author:      e.Commit.Author,
-		AuthorName:  e.Commit.AuthorName,
-		AuthorEmail: e.Commit.AuthorEmail,
-		PRURL:       e.pr,
-		PRNumber:    prNumber,
-		HeadBranch:  e.headBranch,
-		BaseBranch:  e.baseBranch,
+		Commit:              e.Commit.SHA,
+		ShortSHA:            e.Commit.ShortSHA(),
+		Title:               e.Commit.Title,
+		Author:              e.Commit.Author,
+		AuthorName:          e.Commit.AuthorName,
+		AuthorEmail:         e.Commit.AuthorEmail,
+		PRURL:               e.pr,
+		PRNumber:            prNumber,
+		HeadBranch:          e.headBranch,
+		BaseBranch:          e.baseBranch,
+		GitHubStackNumber:   e.NativeStackNumber,
+		GitHubStackPosition: e.NativeStackPosition,
+		GitHubStackSize:     e.NativeStackSize,
+		GitHubStackBase:     e.NativeStackBase,
 	})
 }
 
@@ -174,9 +190,13 @@ func (e *Entry) prettyColor(links bool) string {
 			prText = hyperlink(e.pr, prText)
 		}
 	}
-	return fmt.Sprintf("* %s%s%s (%s, '%s' -> '%s'): %s",
+	nativeText := e.nativeStackText()
+	if nativeText != "" {
+		nativeText = " " + nativeText
+	}
+	return fmt.Sprintf("* %s%s%s (%s, '%s' -> '%s'%s): %s",
 		Bold, sha, Reset,
-		prText, e.headBranch, e.baseBranch,
+		prText, e.headBranch, e.baseBranch, nativeText,
 		e.Commit.Title,
 	)
 }
@@ -188,9 +208,25 @@ func (e *Entry) prettyPlain() string {
 		prNum, _ := e.PRNumber()
 		prText = fmt.Sprintf("#%d", prNum)
 	}
-	return fmt.Sprintf("* %s (%s, '%s' -> '%s'): %s",
-		sha, prText, e.headBranch, e.baseBranch,
+	nativeText := e.nativeStackText()
+	if nativeText != "" {
+		nativeText = " " + nativeText
+	}
+	return fmt.Sprintf("* %s (%s, '%s' -> '%s'%s): %s",
+		sha, prText, e.headBranch, e.baseBranch, nativeText,
 		e.Commit.Title,
+	)
+}
+
+func (e *Entry) nativeStackText() string {
+	if e.NativeStackNumber == nil || e.NativeStackSize == 0 {
+		return ""
+	}
+	return fmt.Sprintf("[native stack #%d %d/%d base=%s]",
+		*e.NativeStackNumber,
+		e.NativeStackPosition,
+		e.NativeStackSize,
+		e.NativeStackBase,
 	)
 }
 

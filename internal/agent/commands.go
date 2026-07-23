@@ -93,15 +93,16 @@ var Commands = map[string]AgentCommandSpec{
 	},
 	"submit": {
 		Name:                         "stack-pr submit",
-		Purpose:                      "Create or update GitHub PRs for each commit in the stack.",
+		Purpose:                      "Create or update GitHub PRs for each commit in the stack; reconcile with a GitHub native Stack when configured.",
 		SideEffects:                  true,
 		RequiresExplicitConfirmation: true,
 		Effects: []string{
 			"May rebase local commits when updating the base.",
 			"Creates or updates generated local branches.",
-			"Force-pushes generated stack branches.",
+			"Force-pushes generated stack branches (force-with-lease when native stacks are enabled).",
 			"Creates or edits GitHub pull requests.",
 			"May amend commits to add stack-info metadata.",
+			"When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.",
 		},
 		SafeBefore: []string{
 			"The user has reviewed the dry-run plan or explicitly requested submission.",
@@ -132,7 +133,7 @@ var Commands = map[string]AgentCommandSpec{
 	},
 	"land": {
 		Name:                         "stack-pr land",
-		Purpose:                      "Squash-merge the bottom PR and rebase the remaining stack.",
+		Purpose:                      "Squash-merge the bottom PR and rebase the remaining stack; refuses to land stacks linked to a GitHub native Stack.",
 		SideEffects:                  true,
 		RequiresExplicitConfirmation: true,
 		Effects: []string{
@@ -152,7 +153,7 @@ var Commands = map[string]AgentCommandSpec{
 	},
 	"abandon": {
 		Name:                         "stack-pr abandon",
-		Purpose:                      "Remove stack metadata and delete generated stack branches.",
+		Purpose:                      "Remove stack metadata and delete generated stack branches; unlinks matching GitHub native Stacks first.",
 		SideEffects:                  true,
 		RequiresExplicitConfirmation: true,
 		Effects: []string{

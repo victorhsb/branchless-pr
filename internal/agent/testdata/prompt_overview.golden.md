@@ -13,24 +13,25 @@ Prefer read-only commands first, and ask before commands that mutate Git, branch
 - `stack-pr checks` — Report CI and review-attention state across the stack without changing commits or PRs. Side effects: no.
 - `stack-pr submit --dry-run` — Preview the PR create/update plan without local Git mutations, pushes, or GitHub writes. Side effects: no.
 - `stack-pr fix --dry-run` — Preview metadata repair on HEAD without amending the commit or writing to GitHub. Side effects: no.
-- `stack-pr submit` — Create or update GitHub PRs for each commit in the stack. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr submit` — Create or update GitHub PRs for each commit in the stack; reconcile with a GitHub native Stack when configured. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - May rebase local commits when updating the base.
   - Creates or updates generated local branches.
-  - Force-pushes generated stack branches.
+  - Force-pushes generated stack branches (force-with-lease when native stacks are enabled).
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
+  - When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.
 - `stack-pr fix` — Repair stack-info metadata on HEAD from an existing PR. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Amends HEAD to add or replace stack-info metadata.
   - Does not create branches, push branches, or modify PRs on GitHub.
-- `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack; refuses to land stacks linked to a GitHub native Stack. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Merges the bottom pull request on GitHub.
   - Rebases and force-pushes remaining stack branches.
   - Deletes local generated branches for landed entries.
   - Rebases the original branch and local target branch when present.
-- `stack-pr abandon` — Remove stack metadata and delete generated stack branches. Side effects: yes. Requires explicit user confirmation.
+- `stack-pr abandon` — Remove stack metadata and delete generated stack branches; unlinks matching GitHub native Stacks first. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Amends commits to strip stack-info metadata.
   - Rebases commits and the original branch.

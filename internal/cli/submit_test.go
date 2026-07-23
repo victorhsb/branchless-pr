@@ -101,6 +101,17 @@ func TestResolveDraftFlagsRejectsInvalidChar(t *testing.T) {
 // commit title, generated head, computed base, create/update action,
 // existing PR URL when present, draft state for new PRs, and a metadata-add
 // indication. The closing no-changes note must always be printed.
+func TestSubmitCmdExposesReceiptFlag(t *testing.T) {
+	cmd := submitCmd()
+	f := cmd.Flags().Lookup("receipt")
+	if f == nil {
+		t.Fatalf("--receipt flag not registered on submit command")
+	}
+	if f.Value.Type() != "string" {
+		t.Fatalf("--receipt flag type = %q, want string", f.Value.Type())
+	}
+}
+
 func TestPrintDryRunPlanRendersAllRequiredFields(t *testing.T) {
 	e1 := &stack.Entry{Commit: &stack.Header{
 		SHA:   "0123456789abcdef0123456789abcdef01234567",

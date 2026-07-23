@@ -89,12 +89,12 @@ stack-pr abandon
 
 | Command | Description |
 | ------- | ----------- |
-| `stack-pr submit` (alias: `export`) | Create or update PRs for each commit. |
-| `stack-pr view` | Inspect the stack without modifying anything. |
+| `stack-pr submit` (alias: `export`) | Create or update PRs for each commit. Optionally reconcile with a GitHub native Stack. |
+| `stack-pr view` | Inspect the stack without modifying anything. Includes native Stack metadata in JSON when enabled. |
 | `stack-pr comments` | Collect PR comments, reviews, and review threads across the stack. |
 | `stack-pr checks` | Report all CI checks and brief review-attention state across the stack. |
-| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. |
-| `stack-pr abandon` | Strip stack metadata and delete generated branches. |
+| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. Refuses to land stacks linked to a GitHub native Stack. |
+| `stack-pr abandon` | Strip stack metadata and delete generated branches. Unstacks matching GitHub native Stacks before deleting remote branches. |
 | `stack-pr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
 | `stack-pr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
 | `stack-pr agent prompt [topic]` | Emit static, versioned guidance for LLM agents. |
@@ -123,6 +123,7 @@ stack-pr abandon
 | `--reviewer`      | Reviewer list.                                                              |
 | `-s, --stash`     | Stash uncommitted changes during submit. Ignored under `--dry-run`.         |
 | `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes. |
+| `--receipt`       | Emit a JSON operation receipt to a file, `-`, or `off`.                      |
 
 ## Previewing with `--dry-run`
 
@@ -132,6 +133,32 @@ the plan that a real submit would execute — per stack entry: the action
 branch, existing PR URL when present, draft state for new PRs, and whether
 stack metadata would be added to the commit. No local Git mutations, remote
 pushes, or GitHub PR writes are performed.
+
+## GitHub native Stacked PRs (private preview)
+
+The `github.native_stacks` setting opts into publishing branchless-pr stacks as GitHub native Stacks:
+
+```ini
+[github]
+native_stacks = off      # default: legacy behavior only
+# native_stacks = auto   # use native stacks when available and eligible
+# native_stacks = required # fail if native stacks cannot be used
+```
+
+Requirements for native mode:
+
+- The repository must have the GitHub native Stacks private preview enabled.
+- Native Stack writes require the `github/gh-stack` extension (`gh extension install github/gh-stack`).
+- Only multi-PR, same-repository stacks with 2-100 PRs are eligible.
+
+Behavior by command:
+
+- `submit`/`export`: after ordinary PR/branch publication, creates, appends, or confirms a native Stack. Uses force-with-lease pushes to avoid overwriting server-side rebases. `--dry-run` reports the planned native action without making GitHub writes.
+- `view`: shows native Stack number, position, size, and base in text and JSON output.
+- `land`: refuses to land a stack that exactly matches a native Stack; merge must be initiated in the GitHub UI until a supported CLI landing contract exists.
+- `abandon`: unlinks a matching native Stack via `gh stack unstack` before deleting generated remote branches.
+
+> **Synchronization limitation:** Using GitHub's Rebase Stack or merge controls can rewrite generated remote branches and leave the branchless-pr local commit stack stale. Recovery requires manual synchronization; native `land` is blocked until GitHub documents a supported non-interactive merge interface.
 
 ## Stack comments
 
