@@ -20,9 +20,17 @@ The system SHALL provide a `config init` subcommand that writes a `.stack-pr.cfg
 
 ### Requirement: Generated file mirrors current defaults
 
-The generated configuration SHALL contain, at minimum, the same keys and values as the built-in `config.Defaults()` map, organised into sections `[common]`, `[repo]`, `[land]`, and `[comments]`.
+The generated configuration SHALL contain, at minimum, the same keys and values as the built-in `config.Defaults()` map, organised into sections `[common]`, `[repo]`, `[github]`, `[land]`, and `[comments]`.
 
 #### Scenario: Defaults parity
 
 - **WHEN** the user runs `stack-pr config init` successfully
 - **THEN** parsing the generated file with `config.Load` and merging with `config.Defaults()` produces no new keys in either direction
+
+#### Scenario: Native Stack default documented
+
+- **WHEN** the user runs `stack-pr config init` successfully
+- **THEN** the generated `[github]` section SHALL contain `native_stacks = off`
+- **AND** inline comments SHALL document the `off`, `auto`, and `required` values
+- **AND** the comments SHALL note that enabling native stacks changes GitHub CI, rules, review, and landing behavior
+- **AND** the comments SHALL state that native Stack writes require the `github/gh-stack` extension
