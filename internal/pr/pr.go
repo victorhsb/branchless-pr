@@ -85,6 +85,19 @@ func IsNativeStackBaseError(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "part of a stack")
 }
 
+// EditTitleBody updates only the title and body of a PR, omitting the base
+// flag. This is used for PRs that belong to a GitHub native Stack, where the
+// API rejects any base edit. Callers that need to update the base should use
+// Edit instead.
+func EditTitleBody(prRef, title string, body []byte) error {
+	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-"}
+	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
+	if err != nil {
+		return fmt.Errorf("gh pr edit %s: %w: %s", prRef, err, strings.TrimSpace(string(stderr)))
+	}
+	return nil
+}
+
 // Edit updates title, body (from stdin), and base of a PR. When GitHub
 // rejects the base change because the PR is part of a native Stack, it
 // retries with only the title and body, leaving the base unchanged.

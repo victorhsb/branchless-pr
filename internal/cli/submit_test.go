@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/victorhsb/branchless-pr/internal/config"
+	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -208,7 +209,7 @@ func TestTempDraftAndResetBasesOptimizedSkipsNoOps(t *testing.T) {
 		e.PR(): {BaseRefName: "main", IsDraft: true},
 	}}
 
-	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache)
+	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
 		e.PR(): {BaseRefName: "feature", IsDraft: false},
 	}}
 
-	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache)
+	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -249,6 +250,96 @@ func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
 	log := readTestFile(t, logPath)
 	mustContain(t, log, "pr ready https://github.com/acme/repo/pull/2 --undo")
 	mustContain(t, log, "pr edit https://github.com/acme/repo/pull/2 -B main")
+}
+
+// TestTempDraftAndResetBasesSkipsNativeStackedPRs verifies that when a PR is
+// in the nativeStackedPRs set, tempDraftAndResetBases skips both ReadyUndo
+// and EditBase entirely — GitHub manages bases server-side for stacked PRs.
+func TestTempDraftAndResetBasesSkipsNativeStackedPRs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	logPath := installFakeGHLogger(t)
+
+	e := &stack.Entry{}
+	e.SetPR("https://github.com/acme/repo/pull/5")
+
+	nativeStacked := map[int]bool{5: true}
+	tmp, err := tempDraftAndResetBases(stack.Stack{e}, "main", nativeStacked)
+	if err != nil {
+		t.Fatalf("tempDraftAndResetBases returned error: %v", err)
+	}
+	if len(tmp) != 0 {
+		t.Fatalf("tmp draft PRs = %v, want none", tmp)
+	}
+	if e.IsTmpDraft {
+		t.Fatalf("entry should not be marked tmp draft for native-stacked PR")
+	}
+	if got := readTestFile(t, logPath); got != "" {
+		t.Fatalf("gh commands = %q, want none (native-stacked PR should be skipped entirely)", got)
+	}
+}
+
+// TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs verifies the
+// optimized path also skips ReadyUndo and EditBase for native-stacked PRs.
+func TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake gh is Unix-only")
+	}
+	logPath := installFakeGHLogger(t)
+
+	e := &stack.Entry{}
+	e.SetPR("https://github.com/acme/repo/pull/7")
+	cache := &submitPRStateCache{infos: map[string]*pr.Info{
+		e.PR(): {BaseRefName: "feature", IsDraft: false},
+	}}
+
+	nativeStacked := map[int]bool{7: true}
+	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nativeStacked)
+	if err != nil {
+		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
+	}
+	if len(tmp) != 0 {
+		t.Fatalf("tmp draft PRs = %v, want none", tmp)
+	}
+	if e.IsTmpDraft {
+		t.Fatalf("entry should not be marked tmp draft for native-stacked PR")
+	}
+	if got := readTestFile(t, logPath); got != "" {
+		t.Fatalf("gh commands = %q, want none (native-stacked PR should be skipped entirely)", got)
+	}
+}
+
+// TestNativeStackedPRNumbers verifies that nativeStackedPRNumbers extracts
+// only PRs with non-nil StackNumber from the preflight membership data.
+func TestNativeStackedPRNumbers(t *testing.T) {
+	stackNum := 42
+	pf := &nativePreflightResult{
+		memberships: map[int]*nativestacks.Membership{
+			10: {PRNumber: 10, StackNumber: &stackNum, Position: 1},
+			20: {PRNumber: 20, StackNumber: &stackNum, Position: 2},
+			30: {PRNumber: 30}, // unstacked
+		},
+	}
+	got := nativeStackedPRNumbers(pf)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if !got[10] || !got[20] {
+		t.Errorf("got = %v, want {10:true, 20:true}", got)
+	}
+	if got[30] {
+		t.Errorf("PR 30 should not be in the set (unstacked)")
+	}
+}
+
+// TestNativeStackedPRNumbersNilPreflight verifies the helper handles nil
+// preflight gracefully.
+func TestNativeStackedPRNumbersNilPreflight(t *testing.T) {
+	got := nativeStackedPRNumbers(nil)
+	if len(got) != 0 {
+		t.Fatalf("len = %d, want 0 for nil preflight", len(got))
+	}
 }
 
 func TestSubmitPREditNeededComparesTitleBodyAndBase(t *testing.T) {

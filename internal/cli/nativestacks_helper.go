@@ -97,11 +97,14 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 
 	// Load membership for existing PRs to decide whether a write is needed.
 	var result *nativestacks.Result
+	var memberships map[int]*nativestacks.Membership
 	if len(prNumbers) == 0 {
 		// All PRs will be created: prospective native Stack create.
 		result = &nativestacks.Result{Kind: nativestacks.ActionCreate}
 	} else {
-		memberships, stacks, err := client.LoadMembership(prNumbers)
+		var stacks nativestacks.StackSet
+		var err error
+		memberships, stacks, err = client.LoadMembership(prNumbers)
 		if err != nil {
 			if nativestacks.IsFeatureUnavailable(err) {
 				if mode == config.NativeStacksAuto {
@@ -152,12 +155,13 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 	}
 
 	return &nativePreflightResult{
-		enabled:   true,
-		client:    client,
-		owner:     owner,
-		repo:      repo,
-		prNumbers: prNumbers,
-		plan:      result,
+		enabled:     true,
+		client:      client,
+		owner:       owner,
+		repo:        repo,
+		prNumbers:   prNumbers,
+		memberships: memberships,
+		plan:        result,
 	}, nil
 }
 
@@ -233,6 +237,24 @@ type nativePreflightResult struct {
 	stacks      nativestacks.StackSet
 	plan        *nativestacks.Result
 	fallback    string
+}
+
+// nativeStackedPRNumbers returns the set of PR numbers whose preflight
+// membership indicates they belong to a GitHub native Stack. The mutation
+// phase uses this to skip temp-draft marking, base-reset, and the -B flag
+// on pr.Edit, because GitHub manages bases server-side for stacked PRs and
+// rejects any base edit.
+func nativeStackedPRNumbers(pf *nativePreflightResult) map[int]bool {
+	out := make(map[int]bool)
+	if pf == nil {
+		return out
+	}
+	for n, m := range pf.memberships {
+		if m != nil && m.IsStacked() {
+			out[n] = true
+		}
+	}
+	return out
 }
 
 func printNativeDryRunPlan(pf *nativePreflightResult) {

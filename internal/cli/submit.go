@@ -110,10 +110,14 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 	}
 
 	experimentalEngine := useExperimentalSubmitEngine(app)
+	var nativeStackedPRs map[int]bool
+	if preflight != nil && preflight.enabled {
+		nativeStackedPRs = nativeStackedPRNumbers(preflight)
+	}
 	if experimentalEngine {
-		err = applyMutationsOptimized(app, st, needsMeta, isDraft, opts, leases)
+		err = applyMutationsOptimized(app, st, needsMeta, isDraft, opts, leases, nativeStackedPRs)
 	} else {
-		err = applyMutations(app, st, needsMeta, isDraft, opts, leases)
+		err = applyMutations(app, st, needsMeta, isDraft, opts, leases, nativeStackedPRs)
 	}
 	if err != nil {
 		return err
@@ -229,7 +233,7 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 	return st, needsMeta, isDraft, nil
 }
 
-func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string) error {
+func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string, nativeStackedPRs map[int]bool) error {
 	if err := initializeStackBranches(st); err != nil {
 		return err
 	}
@@ -239,7 +243,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		needsBranchRebase, _ = git.IsAncestor(top.Head(), app.OrigBranch)
 	}
 
-	tmpDraftPRs, err := tempDraftAndResetBases(st, app.Args.Target)
+	tmpDraftPRs, err := tempDraftAndResetBases(st, app.Args.Target, nativeStackedPRs)
 	if err != nil {
 		return err
 	}
@@ -301,8 +305,15 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 			existingBody = info.Body
 		}
 		body := stack.BuildPRBody(e, st, opts.KeepBody, existingBody)
-		if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
-			return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+		prNum, _ := e.PRNumber()
+		if nativeStackedPRs[prNum] {
+			if err := pr.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
+				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+			}
+		} else {
+			if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
+				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+			}
 		}
 	}
 
@@ -331,7 +342,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	return nil
 }
 
-func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string) error {
+func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string, nativeStackedPRs map[int]bool) error {
 	if err := initializeStackBranches(st); err != nil {
 		return err
 	}
@@ -345,7 +356,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot fetch PR state: %w", err)
 	}
-	tmpDraftPRs, err := tempDraftAndResetBasesOptimized(st, app.Args.Target, cache)
+	tmpDraftPRs, err := tempDraftAndResetBasesOptimized(st, app.Args.Target, cache, nativeStackedPRs)
 	if err != nil {
 		return err
 	}
@@ -427,8 +438,15 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		if !submitPREditNeeded(info, e.Commit.Title, e.Base(), body) {
 			continue
 		}
-		if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
-			return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+		prNum, _ := e.PRNumber()
+		if nativeStackedPRs[prNum] {
+			if err := pr.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
+				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+			}
+		} else {
+			if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
+				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
+			}
 		}
 		cache.updateEdit(e.PR(), e.Commit.Title, e.Base(), string(body))
 	}
@@ -469,10 +487,14 @@ func initializeStackBranches(st stack.Stack) error {
 	return nil
 }
 
-func tempDraftAndResetBases(st stack.Stack, target string) ([]string, error) {
+func tempDraftAndResetBases(st stack.Stack, target string, nativeStackedPRs map[int]bool) ([]string, error) {
 	var tmpDraftPRs []string
 	for _, e := range st {
 		if !e.HasPR() {
+			continue
+		}
+		prNum, _ := e.PRNumber()
+		if nativeStackedPRs[prNum] {
 			continue
 		}
 		info, err := pr.View(e.PR())
@@ -496,10 +518,14 @@ func tempDraftAndResetBases(st stack.Stack, target string) ([]string, error) {
 	return tmpDraftPRs, nil
 }
 
-func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submitPRStateCache) ([]string, error) {
+func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submitPRStateCache, nativeStackedPRs map[int]bool) ([]string, error) {
 	var tmpDraftPRs []string
 	for _, e := range st {
 		if !e.HasPR() {
+			continue
+		}
+		prNum, _ := e.PRNumber()
+		if nativeStackedPRs[prNum] {
 			continue
 		}
 		info, err := cache.get(e.PR())

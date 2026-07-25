@@ -531,6 +531,14 @@ Detailed behavior:
 - If not draft, mark draft using `gh pr ready <pr> --undo` and set `is_tmp_draft=True`.
 - Set PR base to the target branch using `gh pr edit <pr> -B <target>`.
 
+> **Native Stack exception:** When `github.native_stacks` is enabled and a PR
+> is a member of a GitHub native Stack (determined during the native preflight),
+> steps 10 and 17 skip the temp-draft marking, base reset, and the `-B` flag on
+> `gh pr edit`. GitHub manages the base chain server-side for stacked PRs and
+> rejects any base edit with `"Cannot change the base branch because the pull
+> request is part of a stack."` The final PR edit uses only `-t` and `-F` for
+> native-stacked PRs.
+
 11. Force-push all stack head branches in one command:
 
 ```bash
