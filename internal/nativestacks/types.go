@@ -20,12 +20,18 @@ const (
 	ModeRequired = config.NativeStacksRequired
 )
 
+// StackRef is a GitHub REST API ref object, e.g. {"ref":"main"}.
+type StackRef struct {
+	Ref string `json:"ref"`
+}
+
 // Stack represents a GitHub native Stack resource returned by the REST API.
+// The API returns base as {"ref":"main"} and does not include a top-level
+// head or size; size is derived from len(PRs).
 type Stack struct {
 	Number int       `json:"number"`
-	Base   string    `json:"base"`
-	Head   string    `json:"head"`
-	Size   int       `json:"size"`
+	Base   StackRef  `json:"base"`
+	Size   int       `json:"-"` // computed from len(PRs), not in API response
 	PRs    []StackPR `json:"pull_requests"`
 }
 
@@ -34,10 +40,10 @@ type StackPR struct {
 	Number      int    `json:"number"`
 	URL         string `json:"url"`
 	State       string `json:"state"`
-	HeadRef     string `json:"head_ref"`
-	BaseRef     string `json:"base_ref"`
-	StackNumber int    `json:"stack_number"`
-	Position    int    `json:"position"`
+	HeadRef     string `json:"-"` // nested under head.ref, not a flat field
+	BaseRef     string `json:"-"` // nested under base.ref, not a flat field
+	StackNumber int    `json:"-"` // not in API response
+	Position    int    `json:"-"` // derived from list index, not in API response
 }
 
 // Membership is the native-stack membership state for a single PR.

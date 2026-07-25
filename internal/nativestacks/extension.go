@@ -39,26 +39,32 @@ func FindExtension() (*ExtensionStatus, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list gh extensions: %w", err)
 	}
+	return parseExtensionList(out), nil
+}
+
+// parseExtensionList scans `gh extension list` output for the gh-stack
+// extension and returns its installed version. The output is tab-separated
+// with columns: <extension-name>\t<repo>\t<ref>. The extension name (e.g.
+// "gh stack") may contain spaces, so we search every whitespace-delimited
+// field for the repo identifier rather than assuming a fixed column index.
+func parseExtensionList(out string) *ExtensionStatus {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		// Output columns: REPO  TAG  DESCRIPTOR
 		fields := strings.Fields(line)
-		if len(fields) < 1 {
-			continue
-		}
-		repo := fields[0]
-		if repo == "github/gh-stack" || strings.HasSuffix(repo, "/gh-stack") {
-			version := ""
-			if len(fields) >= 2 {
-				version = strings.TrimPrefix(fields[1], "v")
+		for i, f := range fields {
+			if f == "github/gh-stack" || strings.HasSuffix(f, "/gh-stack") {
+				status := &ExtensionStatus{Installed: true}
+				if i+1 < len(fields) {
+					status.Version = strings.TrimPrefix(fields[i+1], "v")
+				}
+				return status
 			}
-			return &ExtensionStatus{Installed: true, Version: version}, nil
 		}
 	}
-	return &ExtensionStatus{Installed: false}, nil
+	return &ExtensionStatus{Installed: false}
 }
 
 var versionRe = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:[+-].*)?$`)

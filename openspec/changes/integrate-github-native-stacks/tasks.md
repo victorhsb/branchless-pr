@@ -82,4 +82,4 @@
 - [x] 10.1 Run focused package tests for configuration, extension/API adapters, reconciliation, submit/export, view, landing refusal, abandon, and receipts
 - [x] 10.2 Run `make fmt-check`, `make vet`, `make test`, `go test -race ./...`, and `make build`
 - [x] 10.3 Run `openspec validate integrate-github-native-stacks` and verify implementation against every scenario in the delta specs
-- [ ] 10.4 Perform an end-to-end preview-repository test covering link create, repeat no-op, append, review UI, CI/rules, landing refusal, and abandon/unstack (deferred: private preview unavailable for live testing)
+- [x] 10.4 Perform an end-to-end preview-repository test covering link create, repeat no-op, append, review UI, CI/rules, landing refusal, and abandon/unstack (verified on connectlyai/connectly-backend with gh-stack v0.0.8)

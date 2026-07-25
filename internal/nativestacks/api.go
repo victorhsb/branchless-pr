@@ -98,9 +98,8 @@ func (c *APIClient) LoadMembership(prNumbers []int) (map[int]*Membership, StackS
 				n := s.Number
 				m.StackNumber = &n
 				m.Position = i + 1
-				m.StackBase = s.Base
-				m.StackSize = s.Size
-				m.StackHead = s.Head
+				m.StackBase = s.Base.Ref
+				m.StackSize = len(s.PRs)
 			}
 		}
 		if containsLocal {

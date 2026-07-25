@@ -70,19 +70,38 @@ func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
 // EditBase updates the base branch of a PR.
 func EditBase(prRef, base string) error {
 	args := []string{"gh", "pr", "edit", prRef, "-B", base}
-	_, err := shell.Output(args, shell.RunOpts{})
+	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
 	if err != nil {
-		return fmt.Errorf("gh pr edit -B %s %s: %w", base, prRef, err)
+		return fmt.Errorf("gh pr edit -B %s %s: %w: %s", base, prRef, err, strings.TrimSpace(string(stderr)))
 	}
 	return nil
 }
 
-// Edit updates title, body (from stdin), and base of a PR.
+// IsNativeStackBaseError reports whether err indicates GitHub rejected a base
+// change because the PR is part of a native Stack. GitHub's API returns this
+// error for any base edit on a stacked PR, even when the new base equals the
+// current base.
+func IsNativeStackBaseError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "part of a stack")
+}
+
+// Edit updates title, body (from stdin), and base of a PR. When GitHub
+// rejects the base change because the PR is part of a native Stack, it
+// retries with only the title and body, leaving the base unchanged.
 func Edit(prRef, title, base string, body []byte) error {
 	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-", "-B", base}
-	_, _, err := shell.Run(args, shell.RunOpts{Stdin: body})
+	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 	if err != nil {
-		return fmt.Errorf("gh pr edit %s: %w", prRef, err)
+		wrapped := fmt.Errorf("gh pr edit %s: %w: %s", prRef, err, strings.TrimSpace(string(stderr)))
+		if IsNativeStackBaseError(wrapped) {
+			args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-"}
+			_, stderr2, err2 := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
+			if err2 != nil {
+				return fmt.Errorf("gh pr edit %s: %w: %s", prRef, err2, strings.TrimSpace(string(stderr2)))
+			}
+			return nil
+		}
+		return wrapped
 	}
 	return nil
 }

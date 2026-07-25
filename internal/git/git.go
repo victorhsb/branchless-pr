@@ -360,15 +360,26 @@ func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error)
 
 // ForcePushWithLease force-pushes with atomic force-with-lease expectations.
 // leases maps branch name to expected remote OID; an empty expectation means
-// the branch must not exist.
+// the branch must not exist. It uses the --force-with-lease=<ref>:<expect>
+// option form (supported since git 2.0) rather than the refspec ^ notation
+// (introduced in git 2.44) for broad compatibility.
 func ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
-	args := []string{"git", "push", "--force-with-lease", remote}
+	args := []string{"git", "push"}
 	for _, r := range refs {
 		expect := leases[r]
-		if expect == "" {
+		if expect != "" {
+			args = append(args, fmt.Sprintf("--force-with-lease=%s:%s", r, expect))
+		}
+	}
+	args = append(args, remote)
+	for _, r := range refs {
+		expect := leases[r]
+		if expect != "" {
+			// Leased ref: the --force-with-lease option above authorizes the overwrite.
 			args = append(args, r+":"+r)
 		} else {
-			args = append(args, fmt.Sprintf("%s:%s^%s", r, r, expect))
+			// No lease: force push without a lease check.
+			args = append(args, "+"+r+":"+r)
 		}
 	}
 	_, _, err := shell.Run(args, shell.RunOpts{})

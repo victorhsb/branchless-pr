@@ -487,6 +487,9 @@ func tempDraftAndResetBases(st stack.Stack, target string) ([]string, error) {
 			tmpDraftPRs = append(tmpDraftPRs, e.PR())
 		}
 		if err := pr.EditBase(e.PR(), target); err != nil {
+			if pr.IsNativeStackBaseError(err) {
+				continue
+			}
 			return nil, fmt.Errorf("ERROR: Cannot reset PR base: %w", err)
 		}
 	}
@@ -513,6 +516,9 @@ func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submi
 		}
 		if info.BaseRefName != target {
 			if err := pr.EditBase(e.PR(), target); err != nil {
+				if pr.IsNativeStackBaseError(err) {
+					continue
+				}
 				return nil, fmt.Errorf("ERROR: Cannot reset PR base: %w", err)
 			}
 			cache.updateBase(e.PR(), target)

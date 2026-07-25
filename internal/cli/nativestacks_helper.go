@@ -115,6 +115,14 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 		result = nativestacks.Classify(prNumbers, memberships, stacks)
 	}
 
+	// If the existing PRs exactly match a native Stack but the local stack
+	// has additional commits without PRs yet, the action is a prospective
+	// append rather than a no-op.
+	if result.Kind == nativestacks.ActionNoop && len(st) > len(prNumbers) {
+		result.Kind = nativestacks.ActionAppend
+		result.SuffixPRs = nil // new PR numbers unknown until created
+	}
+
 	// Determine if the extension is required for the planned action.
 	needsWriter := result.IsWriteAction()
 	if needsWriter {
@@ -179,7 +187,27 @@ func reconcileNativeStack(pf *nativePreflightResult) (*nativestacks.Result, erro
 
 	// Verify the resulting Stack matches the planned sequence.
 	if result.IsWriteAction() {
-		s, err := pf.client.GetStack(result.StackNumber)
+		// After a create, the stack number is unknown (gh stack link does not
+		// return it), so reload membership to discover it. After an append,
+		// the stack number is already known from the plan.
+		stackNumber := result.StackNumber
+		if stackNumber == 0 {
+			memberships, _, err := pf.client.LoadMembership(result.LocalPRs)
+			if err != nil {
+				return result, fmt.Errorf("cannot reload membership: %w", err)
+			}
+			for _, n := range result.LocalPRs {
+				if m, ok := memberships[n]; ok && m.IsStacked() {
+					stackNumber = *m.StackNumber
+					break
+				}
+			}
+			if stackNumber == 0 {
+				return result, fmt.Errorf("native Stack create succeeded but could not find the resulting stack number")
+			}
+			result.StackNumber = stackNumber
+		}
+		s, err := pf.client.GetStack(stackNumber)
 		if err != nil {
 			return result, fmt.Errorf("cannot verify native Stack after write: %w", err)
 		}
