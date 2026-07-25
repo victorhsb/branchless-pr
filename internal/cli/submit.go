@@ -128,11 +128,22 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 	if preflight != nil && preflight.enabled {
 		// Re-classify with final PR numbers (new PRs now have URLs/numbers).
 		finalPRs := localPRNumbers(st)
-		memberships, stacks, merr := preflight.client.LoadMembership(finalPRs)
+		prs, memberships, stacks, merr := preflight.client.LoadState(finalPRs)
 		if merr != nil {
 			return fmt.Errorf("native reconciliation failed: cannot reload membership: %w", merr)
 		}
 		preflight.plan = nativestacks.Classify(finalPRs, memberships, stacks)
+		if preflight.plan.IsWriteAction() {
+			if lerr := preflight.client.LoadWriteLifecycle(preflight.plan, prs); lerr != nil {
+				return fmt.Errorf("ERROR: earlier PR/branch updates may have completed, but native reconciliation could not validate PR lifecycle: %w", lerr)
+			}
+			if verr := nativestacks.ValidateWritePlan(preflight.plan, prs, stacks, preflight.owner+"/"+preflight.repo); verr != nil {
+				return fmt.Errorf("ERROR: earlier PR/branch updates may have completed, but native reconciliation failed eligibility validation: %w", verr)
+			}
+		}
+		preflight.prs = prs
+		preflight.memberships = memberships
+		preflight.stacks = stacks
 		var rerr error
 		nativeResult, rerr = reconcileNativeStack(preflight)
 		if rerr != nil {

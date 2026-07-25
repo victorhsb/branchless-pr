@@ -216,7 +216,7 @@ These options are shared by `submit`, `export`, `view`, `comments`, `checks`, `l
 
 #### `stack-pr submit`
 
-Creates or updates the stack of PRs. Alias: `stack-pr export`. When `github.native_stacks` is `auto` or `required` and the repository supports GitHub native Stacked PRs, the command reconciles the final PR chain with a GitHub native Stack after ordinary PR and branch publication completes. Native Stack writes require the `github/gh-stack` extension.
+Creates or updates the stack of PRs. Alias: `stack-pr export`. When `github.native_stacks` is `auto` or `required` and the repository supports GitHub native Stacked PRs, the command reconciles the final PR chain with a GitHub native Stack after ordinary PR and branch publication completes. It reads each candidate PR and every referenced complete Stack, then uses the documented REST create or append endpoint through `gh api`. Create sends all 2-100 PR numbers bottom-to-top; append sends only the 1-100 unstacked suffix. Every returned Stack must exactly match the intended sequence. A transport or server failure after a write is reconciled by reading current membership before the command reports success or failure; the write is never blindly retried.
 
 Options:
 
@@ -285,7 +285,7 @@ The configured style is read from `land.style`. The `--whole-stack` flag overrid
 
 Removes stack metadata from commits, deletes local generated branches, and deletes matching remote generated branches. The current implementation does not call `gh pr close`; although README text describes closing PRs, the code only strips metadata and deletes branches.
 
-When native stacks are enabled, `abandon` first loads GitHub native Stack membership. If the local PR sequence exactly matches a native Stack, it runs `gh stack unstack <stack-number>` and verifies through the REST API that no unmerged local PR remains stacked before deleting generated remote branches.
+When native stacks are enabled, `abandon` first loads GitHub native Stack membership. If the local PR sequence exactly matches a native Stack, it POSTs with no body to the documented REST unstack endpoint before deleting generated remote branches. A `204` response means the Stack was dissolved; a `200` response contains the surviving partial Stack. Branch deletion stops if an affected PR with `merged_at = null` remains stacked. An uncertain write is reconciled by reading the numbered Stack and is not blindly retried.
 
 #### `stack-pr config init`
 
@@ -340,7 +340,9 @@ native_stacks=off|auto|required
 style=bottom-only|whole-stack|disable
 ```
 
-`github.native_stacks` controls GitHub native Stacked PR integration. The default is `off`. `auto` enables native reconciliation when the repository supports it and the required `github/gh-stack` extension is installed; it falls back to legacy behavior when native Stacks are unavailable or ineligible. `required` fails before command-specific mutation when native Stacks are unavailable, ineligible, or the extension is missing. Native Stack writes require the `github/gh-stack` extension.
+`github.native_stacks` controls GitHub native Stacked PR integration. The default is `off`. `auto` enables native reconciliation when the repository supports it and falls back to legacy behavior when native Stacks are unavailable or ineligible. `required` fails before command-specific mutation when native Stacks are unavailable or ineligible. Native operations use the documented REST API through the base `gh` CLI; no `github/gh-stack` extension is required.
+
+GitHub documents a 2-100-member create request and a 1-100-member append request, but does not document whether 100 is an aggregate Stack limit. The Go port conservatively limits native publication to 100 total PRs until preview validation establishes a larger safe contract. This is a branchless-pr client policy, not a claimed GitHub server constraint.
 
 The config command writes values as strings. Boolean values are later read with `ConfigParser.getboolean`.
 

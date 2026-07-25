@@ -18,7 +18,11 @@ func Classify(localPRs []int, memberships map[int]*Membership, stacks StackSet) 
 		return &Result{Kind: ActionIneligible, LocalPRs: localPRs, Conflict: "single PR stacks are standalone"}
 	}
 	if len(localPRs) > 100 {
-		return &Result{Kind: ActionIneligible, LocalPRs: localPRs, Conflict: "stack exceeds 100 PRs"}
+		return &Result{
+			Kind:     ActionIneligible,
+			LocalPRs: localPRs,
+			Conflict: "branchless-pr conservatively limits native Stacks to 100 total PRs; GitHub documents 100 per request but not an aggregate limit",
+		}
 	}
 
 	// Collect membership state and check for consistency.
@@ -102,8 +106,8 @@ func Classify(localPRs []int, memberships map[int]*Membership, stacks StackSet) 
 
 	// Append: remote sequence must be exact proper prefix of local sequence,
 	// and every suffix PR must be unstacked.
-	if suffixStart > len(remoteSeq) {
-		return conflictResult(localPRs, memberships, "local prefix extends beyond native Stack #%d", stackNumber)
+	if suffixStart != len(remoteSeq) {
+		return conflictResult(localPRs, memberships, "native Stack #%d is not the exact local stacked prefix", stackNumber)
 	}
 	if !intSlicesEqual(localPRs[:suffixStart], remoteSeq[:suffixStart]) {
 		return conflictResult(localPRs, memberships, "local prefix does not match native Stack #%d", stackNumber)

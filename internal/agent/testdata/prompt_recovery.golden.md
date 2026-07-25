@@ -18,7 +18,7 @@ Prefer read-only inspection and user guidance over automatic cleanup.
   - Force-pushes generated stack branches (force-with-lease when native stacks are enabled).
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
-  - When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.
+  - When github.native_stacks is auto or required, may create or append a GitHub native Stack through the documented REST API.
 - `stack-pr land` — Squash-merge the bottom PR and rebase the remaining stack; refuses to land stacks linked to a GitHub native Stack. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Merges the bottom pull request on GitHub.

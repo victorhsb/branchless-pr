@@ -8,9 +8,7 @@ Define the canonical behavior of `stack-pr land` for landing stacked pull reques
 - `whole-stack`: lands all PRs in the stack atomically by retargeting the tip PR to the target branch and queuing a GitHub rebase auto-merge. Requires that the repository target branch has GitHub merge queue enabled.
 
 The land command mutates local Git state (branch checkout, rebasing), updates GitHub PR state (base branch changes, merge queue scheduling), and force-pushes remaining stack branches (in `bottom-only` mode). It is only available when `land.style` is not `disable`. If `land.style` is `disable`, the command is not registered.
-
 ## Requirements
-
 ### Requirement: Command Registration
 
 The `land` subcommand SHALL be registered only when the configured land style permits it.
@@ -293,7 +291,7 @@ When native integration is enabled, land SHALL inspect GitHub membership before 
 
 - **GIVEN** local membership exactly matches a native Stack
 - **WHEN** `stack-pr land` refuses native landing
-- **THEN** it SHALL NOT run `gh stack unstack`
+- **THEN** it SHALL NOT call the REST unstack endpoint
 - **AND** it SHALL NOT run `gh pr merge`
 - **AND** it SHALL NOT edit PR bases, checkout generated heads, rebase, push, fetch for cleanup, or delete branches
 
@@ -332,15 +330,15 @@ When native integration is enabled, land SHALL inspect GitHub membership before 
 - **GIVEN** `github.native_stacks = off`
 - **WHEN** `stack-pr land` runs
 - **THEN** it SHALL use the existing land algorithm
-- **AND** it SHALL NOT query native membership or invoke the gh-stack extension
+- **AND** it SHALL NOT query or mutate native Stack membership
 
 ### Requirement: Native Landing Is Deferred Pending Synchronization
 
-The system SHALL treat supported native landing and remote-to-local synchronization as follow-up behavior rather than relying on undocumented CLI merge behavior.
+The system SHALL treat supported native landing and remote-to-local synchronization as follow-up behavior because the documented Stacks REST API provides no merge or rebase endpoint.
 
 #### Scenario: Standard PR merge is not assumed stack-aware
 
-- **GIVEN** the installed gh-stack extension exposes no supported merge command
+- **GIVEN** the Stacks REST API exposes no merge operation
 - **WHEN** branchless-pr handles a matching native Stack
 - **THEN** it SHALL NOT assume `gh pr merge` provides a stable stacked-PR landing contract
 

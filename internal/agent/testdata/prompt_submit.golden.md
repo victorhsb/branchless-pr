@@ -16,7 +16,7 @@ Use submit only after the user requests publishing or updating PRs, or explicitl
   - Force-pushes generated stack branches (force-with-lease when native stacks are enabled).
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
-  - When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.
+  - When github.native_stacks is auto or required, may create or append a GitHub native Stack through the documented REST API.
 
 ## Rules
 

@@ -344,16 +344,27 @@ func ForcePush(remote string, refs ...string) error {
 	return nil
 }
 
-// ResolveRemoteRefs returns the current OID for each remote ref, or an empty
-// string if the ref does not exist.
+// ResolveRemoteRefs reads current branch OIDs from the remote itself. Missing
+// refs are omitted from the result.
 func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error) {
 	result := make(map[string]string, len(refs))
+	args := []string{"git", "ls-remote", "--heads", remote}
 	for _, r := range refs {
-		out, err := shell.Output([]string{"git", "rev-parse", remote + "/" + r}, shell.RunOpts{Quiet: true, Check: false})
-		if err != nil {
-			continue // ref does not exist
+		args = append(args, "refs/heads/"+r)
+	}
+	out, err := shell.Output(args, shell.RunOpts{Quiet: true})
+	if err != nil {
+		return nil, &Error{Op: "resolve_remote_refs", Err: err}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
 		}
-		result[r] = strings.TrimSpace(out)
+		const prefix = "refs/heads/"
+		if strings.HasPrefix(fields[1], prefix) {
+			result[strings.TrimPrefix(fields[1], prefix)] = fields[0]
+		}
 	}
 	return result, nil
 }
@@ -364,23 +375,14 @@ func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error)
 // option form (supported since git 2.0) rather than the refspec ^ notation
 // (introduced in git 2.44) for broad compatibility.
 func ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
-	args := []string{"git", "push"}
+	args := []string{"git", "push", "--atomic"}
 	for _, r := range refs {
 		expect := leases[r]
-		if expect != "" {
-			args = append(args, fmt.Sprintf("--force-with-lease=%s:%s", r, expect))
-		}
+		args = append(args, fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", r, expect))
 	}
 	args = append(args, remote)
 	for _, r := range refs {
-		expect := leases[r]
-		if expect != "" {
-			// Leased ref: the --force-with-lease option above authorizes the overwrite.
-			args = append(args, r+":"+r)
-		} else {
-			// No lease: force push without a lease check.
-			args = append(args, "+"+r+":"+r)
-		}
+		args = append(args, r+":refs/heads/"+r)
 	}
 	_, _, err := shell.Run(args, shell.RunOpts{})
 	if err != nil {

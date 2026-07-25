@@ -1,9 +1,7 @@
 ## Purpose
 
 Define dry-run behavior for previewing submit/export actions without changing local Git state or GitHub state.
-
 ## Requirements
-
 ### Requirement: Submit Export Dry Run Flag
 
 The `stack-pr submit` command and its `export` alias SHALL support a `--dry-run` flag that previews submit/export actions without applying them.
@@ -109,7 +107,7 @@ Submit/export dry-run SHALL describe native Stack reconciliation without perform
 - **GIVEN** native integration is enabled
 - **AND** every stack entry already has a PR number
 - **WHEN** submit/export runs with `--dry-run`
-- **THEN** the plan SHALL report the classified native action as `create`, `append`, `noop`, `conflict`, `ineligible`, `missing extension fallback`, or `unavailable fallback`
+- **THEN** the plan SHALL report the classified native action as `create`, `append`, `noop`, `conflict`, `ineligible`, or `unavailable fallback`
 
 #### Scenario: New PRs produce prospective action
 
@@ -130,7 +128,7 @@ Submit/export dry-run SHALL describe native Stack reconciliation without perform
 
 - **GIVEN** any native mode
 - **WHEN** submit/export runs with `--dry-run`
-- **THEN** it SHALL NOT invoke `gh stack link`, `gh stack unstack`, or REST Stack write operations
+- **THEN** it SHALL NOT invoke REST create, append, or unstack operations
 - **AND** it SHALL preserve all existing local Git, remote push, and PR no-mutation guarantees
 
 #### Scenario: Read-only membership query is allowed

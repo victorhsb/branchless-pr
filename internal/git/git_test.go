@@ -71,8 +71,8 @@ func TestResolveRemoteRefs(t *testing.T) {
 	bin := t.TempDir()
 	fakeGit := filepath.Join(bin, "git")
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = rev-parse ] && [ \"$2\" = origin/foo ]; then\n" +
-		"  printf 'abc123\\n'\n" +
+		"if [ \"$1\" = ls-remote ] && [ \"$2\" = --heads ] && [ \"$3\" = origin ]; then\n" +
+		"  printf 'abc123\\trefs/heads/foo\\n'\n" +
 		"  exit 0\n" +
 		"fi\n" +
 		"exit 1\n"
@@ -90,6 +90,44 @@ func TestResolveRemoteRefs(t *testing.T) {
 	}
 	if _, ok := got["bar"]; ok {
 		t.Errorf("bar should be absent")
+	}
+}
+
+func TestForcePushWithLeaseUsesAtomicExplicitExpectations(t *testing.T) {
+	bin := t.TempDir()
+	fakeGit := filepath.Join(bin, "git")
+	logPath := filepath.Join(t.TempDir(), "git.log")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > \"$BPR_GIT_TEST_LOG\"\n"
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("BPR_GIT_TEST_LOG", logPath)
+
+	err := ForcePushWithLease("origin", map[string]string{
+		"foo": "abc123",
+		"bar": "",
+	}, "foo", "bar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Fields(string(data))
+	want := []string{
+		"push",
+		"--atomic",
+		"--force-with-lease=refs/heads/foo:abc123",
+		"--force-with-lease=refs/heads/bar:",
+		"origin",
+		"foo:refs/heads/foo",
+		"bar:refs/heads/bar",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("git args:\n%v\nwant:\n%v", got, want)
 	}
 }
 

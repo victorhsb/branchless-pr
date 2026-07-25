@@ -5,9 +5,7 @@
 Define the canonical behavior of `stack-pr submit` and its `stack-pr export` alias for creating or updating a stack of GitHub pull requests from an ordered set of local commits.
 
 Submit/export mutates local Git state (branch creation, rebasing, commit amending, stashing), pushes generated branches to the remote, creates or updates GitHub PRs, adds `stack-info` metadata to commit messages, and manages cross-links between PRs. Dry-run mode previews these actions without mutation. Operation receipts provide opt-in machine-readable records of completed side effects.
-
 ## Requirements
-
 ### Requirement: Pre-flight Checks
 
 Before any mutation, submit/export SHALL validate repository prerequisites.
@@ -332,7 +330,7 @@ When native integration is enabled, submit/export SHALL reconcile the final subm
 
 - **GIVEN** native integration is enabled for an eligible stack
 - **WHEN** submit/export has completed final branch pushes, commit metadata amendment, PR title/body/base updates, and temporary draft restoration
-- **THEN** the command SHALL classify the local PR sequence against GitHub native membership
+- **THEN** the command SHALL reload and validate candidate PR state and native membership
 - **AND** it SHALL apply only a `create`, `append`, or `noop` result
 
 #### Scenario: Both submit engines reconcile identically
@@ -346,16 +344,16 @@ When native integration is enabled, submit/export SHALL reconcile the final subm
 
 - **GIVEN** the final eligible PR chain is entirely unstacked
 - **WHEN** submit/export reconciles native membership
-- **THEN** it SHALL call `gh stack link` with every existing PR number bottom-to-top
-- **AND** it SHALL verify the resulting complete sequence through the REST API
+- **THEN** it SHALL POST every existing PR number bottom-to-top to `repos/{owner}/{repo}/stacks`
+- **AND** it SHALL require a `201` Stack response with the exact resulting complete sequence
 
 #### Scenario: Existing native Stack extended
 
 - **GIVEN** the remote native sequence is an exact prefix of the final local PR sequence
 - **AND** the local suffix PRs are unstacked
 - **WHEN** submit/export reconciles native membership
-- **THEN** it SHALL call `gh stack link` with the existing Stack number followed by only the suffix PR numbers
-- **AND** it SHALL verify the resulting complete sequence through the REST API
+- **THEN** it SHALL POST only the suffix PR numbers to `repos/{owner}/{repo}/stacks/{stack_number}/add`
+- **AND** it SHALL require a `200` Stack response with the exact resulting complete sequence
 
 #### Scenario: Exact native Stack skips write
 
@@ -370,6 +368,14 @@ When native integration is enabled, submit/export SHALL reconcile the final subm
 - **WHEN** reconciliation runs
 - **THEN** the command SHALL return an error without changing native membership
 - **AND** the error SHALL state that earlier PR or branch updates may already have completed
+
+#### Scenario: Uncertain create or append is reconciled
+
+- **GIVEN** a native create or append request fails with an uncertain server outcome
+- **WHEN** submit/export handles the failure
+- **THEN** it SHALL read current native membership and the complete affected Stack
+- **AND** it SHALL accept an exact intended sequence as success
+- **AND** it SHALL report unchanged, divergent, or unverified state without blindly repeating the write
 
 #### Scenario: Cross-links retained in native mode
 
@@ -404,7 +410,7 @@ When native mode is active, submit/export SHALL avoid overwriting server-side St
 
 ### Requirement: Native Stack Availability Preflight
 
-Required native integration SHALL fail before submit-specific mutation when repository support is unavailable.
+Required native integration SHALL fail before submit-specific mutation when repository support is unavailable, and native writes SHALL use the documented REST endpoints through the base GitHub CLI.
 
 #### Scenario: Required mode unavailable before submit mutation
 
@@ -421,31 +427,13 @@ Required native integration SHALL fail before submit-specific mutation when repo
 - **THEN** it SHALL warn once
 - **AND** it SHALL execute the legacy submit/export algorithm without native reconciliation
 
-#### Scenario: Auto mode missing extension skips unstacked create
+#### Scenario: Native writer requires no extension
 
-- **GIVEN** `github.native_stacks = auto`
-- **AND** every existing local PR is unstacked
-- **AND** the gh-stack extension required for native creation is missing or unsupported
-- **WHEN** submit/export begins
-- **THEN** it SHALL warn that native Stack creation will be skipped
-- **AND** it MAY execute the legacy submit/export algorithm with unstacked PRs
-
-#### Scenario: Auto mode missing extension blocks native append
-
-- **GIVEN** `github.native_stacks = auto`
-- **AND** the remote native sequence is a prefix of the local sequence that requires append
-- **AND** the gh-stack extension is missing or unsupported
-- **WHEN** submit/export begins
-- **THEN** it SHALL fail before generated branch creation, commit amendment, remote push, PR mutation, or native Stack mutation
-- **AND** it SHALL NOT publish an unstacked suffix above the existing native Stack
-
-#### Scenario: Required mode missing extension before submit mutation
-
-- **GIVEN** `github.native_stacks = required`
-- **AND** the gh-stack extension is missing or below the supported version
-- **WHEN** submit/export begins
-- **THEN** it SHALL fail before generated branch creation, commit amendment, remote push, PR mutation, or native Stack mutation
-- **AND** the error SHALL provide an extension installation or upgrade command
+- **GIVEN** GitHub native Stacks is available
+- **AND** the final PR chain is eligible for create or append
+- **WHEN** submit/export performs native preflight
+- **THEN** it SHALL proceed using `gh api`
+- **AND** it SHALL NOT inspect, require, install, or upgrade the `github/gh-stack` extension
 
 ### Requirement: Dry Run Behavior
 

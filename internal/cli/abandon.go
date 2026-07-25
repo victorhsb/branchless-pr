@@ -73,35 +73,12 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 	switch result.Kind {
 	case nativestacks.ActionNoop:
 		// Exact native membership: unstack before deleting remote branches.
-		ext, err := nativestacks.FindExtension()
+		unstacked, err := client.Unstack(result.StackNumber)
 		if err != nil {
-			return fmt.Errorf("cannot check gh-stack extension: %w", err)
-		}
-		if !ext.Installed {
-			return &nativestacks.ErrExtensionMissing{Min: nativestacks.MinimumExtensionVersion}
-		}
-		if err := nativestacks.ValidateExtensionVersion(ext.Version, nativestacks.MinimumExtensionVersion); err != nil {
-			return err
-		}
-		if err := nativestacks.Unstack(result.StackNumber); err != nil {
 			return fmt.Errorf("failed to unstack native Stack #%d: %w", result.StackNumber, err)
 		}
-		// Verify unstack result.
-		s, err := client.GetStack(result.StackNumber)
-		if err != nil && !nativestacks.IsFeatureUnavailable(err) {
-			return fmt.Errorf("cannot verify native unstack result: %w", err)
-		}
-		if s != nil && len(s.PRs) > 0 {
-			for _, pr := range s.PRs {
-				// If an unmerged local PR remains stacked, stop before branch deletion.
-				if pr.State != "MERGED" {
-					for _, n := range prNumbers {
-						if pr.Number == n {
-							return fmt.Errorf("native unstack left unmerged PR #%d stacked; stopping before remote branch deletion", n)
-						}
-					}
-				}
-			}
+		if err := ensureUnstackAllowsCleanup(unstacked, prNumbers); err != nil {
+			return err
 		}
 		return nil
 	case nativestacks.ActionCreate:
@@ -117,6 +94,25 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 	default:
 		return nil
 	}
+}
+
+func ensureUnstackAllowsCleanup(result *nativestacks.UnstackResult, localPRs []int) error {
+	if result == nil {
+		return fmt.Errorf("native unstack returned no result; stopping before remote branch deletion")
+	}
+	if result.Dissolved || result.Stack == nil {
+		return nil
+	}
+	local := make(map[int]struct{}, len(localPRs))
+	for _, number := range localPRs {
+		local[number] = struct{}{}
+	}
+	for _, pr := range result.Stack.PRs {
+		if _, ok := local[pr.Number]; ok && !pr.IsMerged() {
+			return fmt.Errorf("native unstack left unmerged PR #%d stacked; stopping before remote branch deletion", pr.Number)
+		}
+	}
+	return nil
 }
 
 func abandonImpl(app *AppContext) error {

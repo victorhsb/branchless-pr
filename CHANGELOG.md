@@ -4,10 +4,11 @@
 
 - Added GitHub native Stacked PR integration via the `github.native_stacks`
   configuration (`off`, `auto`, `required`; default `off`). When enabled,
-  `submit`/`export` reconciles the PR chain with a GitHub native Stack using
-  the `github/gh-stack` extension, `view` surfaces native Stack metadata, `land`
-  refuses unsupported native landing, and `abandon` unlinks matching native
-  Stacks before deleting remote branches.
+  `submit`/`export` reconciles the PR chain through the documented Stack REST
+  create/add endpoints, `view` surfaces native Stack metadata, `land` refuses
+  unsupported native landing, and `abandon` uses the REST unstack endpoint
+  before deleting remote branches. Native writes reconcile uncertain outcomes
+  through reads and require only the base `gh` CLI.
 - Added `--receipt` to `submit`/`export` for emitting a JSON operation receipt.
 - Added `-b` shorthand for `--branch-name-template` flag.
 

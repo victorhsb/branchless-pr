@@ -20,7 +20,7 @@ Prefer read-only commands first, and ask before commands that mutate Git, branch
   - Force-pushes generated stack branches (force-with-lease when native stacks are enabled).
   - Creates or edits GitHub pull requests.
   - May amend commits to add stack-info metadata.
-  - When github.native_stacks is auto or required, may create or append a GitHub native Stack via gh stack link.
+  - When github.native_stacks is auto or required, may create or append a GitHub native Stack through the documented REST API.
 - `stack-pr fix` — Repair stack-info metadata on HEAD from an existing PR. Side effects: yes. Requires explicit user confirmation.
   Effects:
   - Amends HEAD to add or replace stack-info metadata.

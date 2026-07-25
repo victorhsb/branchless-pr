@@ -4,12 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
-// FeatureUnavailable is returned when the GitHub native Stacks feature is not
-// enabled for the repository or account.
+// FeatureUnavailable is returned only when ordinary repository access succeeds
+// and the repository-level Stacks endpoint reports that the preview is absent.
 type FeatureUnavailable struct {
 	Msg string
 }
@@ -21,63 +19,77 @@ func (e *FeatureUnavailable) Error() string {
 	return "GitHub native Stacks is unavailable for this repository"
 }
 
-// IsFeatureUnavailable reports whether err signals that native Stacks is
-// unavailable as opposed to an authentication/authorization/transport error.
+// IsFeatureUnavailable reports whether err is the repository-level preview
+// availability result.
 func IsFeatureUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	var fu *FeatureUnavailable
-	if errors.As(err, &fu) {
-		return true
-	}
-	// The gh-stack extension documents exit code 9 for unavailable native stacks.
-	exit := shell.AsExitError(err)
-	if exit != nil && exit.ExitCode() == 9 {
-		return true
-	}
-	return false
+	var unavailable *FeatureUnavailable
+	return errors.As(err, &unavailable)
 }
 
-// IsAuthenticationError reports whether err is an auth or authorization failure.
+// StackNotFound distinguishes a missing numbered Stack from a repository where
+// the preview feature is unavailable.
+type StackNotFound struct {
+	Number int
+	Err    error
+}
+
+func (e *StackNotFound) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("native Stack #%d not found: %v", e.Number, e.Err)
+	}
+	return fmt.Sprintf("native Stack #%d not found", e.Number)
+}
+
+func (e *StackNotFound) Unwrap() error { return e.Err }
+
+// IsStackNotFound reports whether err identifies a missing numbered Stack.
+func IsStackNotFound(err error) bool {
+	var notFound *StackNotFound
+	return errors.As(err, &notFound)
+}
+
+// APIError preserves REST operation context and whether a failed write may
+// have reached GitHub.
+type APIError struct {
+	Method         string
+	Endpoint       string
+	Status         int
+	Message        string
+	Headers        string
+	OutcomeUnknown bool
+	Err            error
+}
+
+func (e *APIError) Error() string {
+	var parts []string
+	if e.Method != "" || e.Endpoint != "" {
+		parts = append(parts, strings.TrimSpace(e.Method+" "+e.Endpoint))
+	}
+	if e.Status != 0 {
+		parts = append(parts, fmt.Sprintf("HTTP %d", e.Status))
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		parts = append(parts, strings.TrimSpace(e.Message))
+	}
+	if e.Err != nil {
+		parts = append(parts, e.Err.Error())
+	}
+	if len(parts) == 0 {
+		return "GitHub API request failed"
+	}
+	return strings.Join(parts, ": ")
+}
+
+func (e *APIError) Unwrap() error { return e.Err }
+
+// IsAPIStatus reports whether an error chain contains the given HTTP status.
+func IsAPIStatus(err error, status int) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == status
+}
+
+// IsAuthenticationError reports whether err is an authentication or
+// authorization failure.
 func IsAuthenticationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return containsAnyLower(msg, []string{
-		"authentication",
-		"unauthorized",
-		"401",
-		"403",
-		"forbidden",
-	}) && !IsFeatureUnavailable(err)
-}
-
-// ClassifyExtensionError converts a gh stack command failure into a stable
-// error type. It avoids parsing human-readable status text.
-func ClassifyExtensionError(err error, stderr []byte) error {
-	if err == nil {
-		return nil
-	}
-	exit := shell.AsExitError(err)
-	if exit != nil {
-		switch exit.ExitCode() {
-		case 9:
-			return &FeatureUnavailable{Msg: "GitHub native Stacks is unavailable (gh-stack exit code 9)"}
-		default:
-			return fmt.Errorf("gh-stack failed (exit %d): %w: %s", exit.ExitCode(), err, string(stderr))
-		}
-	}
-	return fmt.Errorf("gh-stack failed: %w: %s", err, string(stderr))
-}
-
-func containsAnyLower(s string, subs []string) bool {
-	s = strings.ToLower(s)
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
+	return IsAPIStatus(err, 401) || IsAPIStatus(err, 403)
 }

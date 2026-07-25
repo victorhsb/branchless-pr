@@ -307,11 +307,10 @@ experimental_engine = false
 # Valid values:
 #   off      - Do not use GitHub native stacks (default, preserves legacy behavior).
 #   auto     - Use native stacks when available and eligible; fall back to legacy
-#              behavior when the feature or required gh-stack extension is missing.
-#   required - Require native stacks; fail if they are unavailable, ineligible, or
-#              the required gh-stack extension is missing.
+#              behavior when the repository feature is unavailable.
+#   required - Require native stacks; fail if they are unavailable or ineligible.
 # Enabling native stacks changes GitHub CI, rules, review, and landing behavior.
-# Native Stack writes require the github/gh-stack extension.
+# Native Stack operations use the documented REST API through the base gh CLI.
 native_stacks = off
 
 [comments]

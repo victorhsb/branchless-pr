@@ -11,6 +11,14 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
+type nativeStackSubmitClient interface {
+	ProbeAvailability() error
+	LoadState([]int) (map[int]*nativestacks.PullRequest, map[int]*nativestacks.Membership, nativestacks.StackSet, error)
+	LoadWriteLifecycle(*nativestacks.Result, map[int]*nativestacks.PullRequest) error
+	CreateStack([]int) (*nativestacks.Stack, error)
+	AppendStack(int, []int, []int) (*nativestacks.Stack, error)
+}
+
 // pushWithLeases pushes branches using force-with-lease when leases are
 // provided, otherwise falls back to a plain force push.
 func pushWithLeases(remote string, heads []string, leases map[string]string) error {
@@ -62,10 +70,8 @@ func nativeMode(cfg *config.Config) (config.NativeStacksMode, error) {
 	return config.ParseNativeStacksMode(cfg.Get("github", "native_stacks"))
 }
 
-// nativeSubmitPreflight probes native Stack availability and the gh-stack
-// extension when native mode is enabled. It returns a result describing whether
-// native reconciliation should proceed, along with availability/extension state.
-// For auto mode it warns and disables native behavior when unavailable.
+// nativeSubmitPreflight probes native Stack availability when native mode is
+// enabled. For auto mode it warns and disables native behavior when unavailable.
 func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeStacksMode) (*nativePreflightResult, error) {
 	if mode == config.NativeStacksOff {
 		return &nativePreflightResult{enabled: false}, nil
@@ -76,14 +82,17 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 		return &nativePreflightResult{enabled: false}, nil
 	}
 
-	prNumbers := localPRNumbers(st)
-
 	owner, repo, err := git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve owner/repo for native submit: %w", err)
 	}
 
 	client := nativestacks.NewAPIClient(owner, repo)
+	return nativeSubmitPreflightWithClient(st, mode, client, owner, repo)
+}
+
+func nativeSubmitPreflightWithClient(st stack.Stack, mode config.NativeStacksMode, client nativeStackSubmitClient, owner, repo string) (*nativePreflightResult, error) {
+	prNumbers := localPRNumbers(st)
 	if err := client.ProbeAvailability(); err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {
 			if mode == config.NativeStacksAuto {
@@ -102,9 +111,7 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 		// All PRs will be created: prospective native Stack create.
 		result = &nativestacks.Result{Kind: nativestacks.ActionCreate}
 	} else {
-		var stacks nativestacks.StackSet
-		var err error
-		memberships, stacks, err = client.LoadMembership(prNumbers)
+		_, memberships, stacks, err := client.LoadState(prNumbers)
 		if err != nil {
 			if nativestacks.IsFeatureUnavailable(err) {
 				if mode == config.NativeStacksAuto {
@@ -115,34 +122,22 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 			}
 			return nil, fmt.Errorf("cannot load native membership: %w", err)
 		}
-		result = nativestacks.Classify(prNumbers, memberships, stacks)
-	}
-
-	// If the existing PRs exactly match a native Stack but the local stack
-	// has additional commits without PRs yet, the action is a prospective
-	// append rather than a no-op.
-	if result.Kind == nativestacks.ActionNoop && len(st) > len(prNumbers) {
-		result.Kind = nativestacks.ActionAppend
-		result.SuffixPRs = nil // new PR numbers unknown until created
-	}
-
-	// Determine if the extension is required for the planned action.
-	needsWriter := result.IsWriteAction()
-	if needsWriter {
-		ext, err := nativestacks.FindExtension()
-		if err != nil {
-			return nil, fmt.Errorf("cannot check gh-stack extension: %w", err)
-		}
-		if !ext.Installed {
-			if mode == config.NativeStacksAuto && result.Kind == nativestacks.ActionCreate {
-				// Safe fallback: no existing native Stack would be left inconsistent.
-				fmt.Fprintln(os.Stderr, "Warning: gh-stack extension is missing; skipping native Stack creation.")
-				return &nativePreflightResult{enabled: false, fallback: "gh-stack extension missing"}, nil
+		if len(prNumbers) == 1 && len(prNumbers) < len(st) {
+			m := memberships[prNumbers[0]]
+			if m != nil && m.IsStacked() {
+				result = &nativestacks.Result{
+					Kind:     nativestacks.ActionConflict,
+					LocalPRs: prNumbers,
+					Conflict: fmt.Sprintf("existing PR #%d already belongs to native Stack #%d while later local PRs do not yet exist", prNumbers[0], *m.StackNumber),
+				}
+			} else {
+				result = &nativestacks.Result{Kind: nativestacks.ActionCreate, LocalPRs: prNumbers}
 			}
-			return nil, &nativestacks.ErrExtensionMissing{Min: nativestacks.MinimumExtensionVersion}
-		}
-		if err := nativestacks.ValidateExtensionVersion(ext.Version, nativestacks.MinimumExtensionVersion); err != nil {
-			return nil, err
+		} else {
+			result = nativestacks.Classify(prNumbers, memberships, stacks)
+			if len(prNumbers) < len(st) {
+				result = prospectiveNativePlan(result, prNumbers)
+			}
 		}
 	}
 
@@ -165,6 +160,28 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 	}, nil
 }
 
+func prospectiveNativePlan(observed *nativestacks.Result, existingPRs []int) *nativestacks.Result {
+	if observed == nil {
+		return &nativestacks.Result{Kind: nativestacks.ActionCreate, LocalPRs: existingPRs}
+	}
+	switch observed.Kind {
+	case nativestacks.ActionCreate:
+		return &nativestacks.Result{
+			Kind:     nativestacks.ActionCreate,
+			LocalPRs: append([]int(nil), existingPRs...),
+		}
+	case nativestacks.ActionNoop, nativestacks.ActionAppend:
+		return &nativestacks.Result{
+			Kind:        nativestacks.ActionAppend,
+			LocalPRs:    append([]int(nil), existingPRs...),
+			RemotePRs:   append([]int(nil), observed.RemotePRs...),
+			StackNumber: observed.StackNumber,
+		}
+	default:
+		return observed
+	}
+}
+
 // reconcileNativeStack applies the planned native Stack action and verifies
 // the result through REST. It is called after all ordinary submit effects.
 func reconcileNativeStack(pf *nativePreflightResult) (*nativestacks.Result, error) {
@@ -176,11 +193,13 @@ func reconcileNativeStack(pf *nativePreflightResult) (*nativestacks.Result, erro
 	case nativestacks.ActionNoop:
 		return result, nil
 	case nativestacks.ActionCreate:
-		if err := nativestacks.LinkCreate(result.LocalPRs); err != nil {
+		s, err := pf.client.CreateStack(result.LocalPRs)
+		if err != nil {
 			return result, fmt.Errorf("native Stack create failed: %w", err)
 		}
+		result.StackNumber = s.Number
 	case nativestacks.ActionAppend:
-		if err := nativestacks.LinkAppend(result.StackNumber, result.SuffixPRs); err != nil {
+		if _, err := pf.client.AppendStack(result.StackNumber, result.SuffixPRs, result.LocalPRs); err != nil {
 			return result, fmt.Errorf("native Stack append failed: %w", err)
 		}
 	case nativestacks.ActionConflict:
@@ -189,52 +208,18 @@ func reconcileNativeStack(pf *nativePreflightResult) (*nativestacks.Result, erro
 		return result, fmt.Errorf("unexpected native action %q", result.Kind)
 	}
 
-	// Verify the resulting Stack matches the planned sequence.
-	if result.IsWriteAction() {
-		// After a create, the stack number is unknown (gh stack link does not
-		// return it), so reload membership to discover it. After an append,
-		// the stack number is already known from the plan.
-		stackNumber := result.StackNumber
-		if stackNumber == 0 {
-			memberships, _, err := pf.client.LoadMembership(result.LocalPRs)
-			if err != nil {
-				return result, fmt.Errorf("cannot reload membership: %w", err)
-			}
-			for _, n := range result.LocalPRs {
-				if m, ok := memberships[n]; ok && m.IsStacked() {
-					stackNumber = *m.StackNumber
-					break
-				}
-			}
-			if stackNumber == 0 {
-				return result, fmt.Errorf("native Stack create succeeded but could not find the resulting stack number")
-			}
-			result.StackNumber = stackNumber
-		}
-		s, err := pf.client.GetStack(stackNumber)
-		if err != nil {
-			return result, fmt.Errorf("cannot verify native Stack after write: %w", err)
-		}
-		got := make([]int, len(s.PRs))
-		for i, pr := range s.PRs {
-			got[i] = pr.Number
-		}
-		if !intSliceEqual(got, result.LocalPRs) {
-			return result, fmt.Errorf("native Stack verification failed: remote sequence %v != planned %v", got, result.LocalPRs)
-		}
-	}
-
 	return result, nil
 }
 
 type nativePreflightResult struct {
 	enabled     bool
-	client      *nativestacks.APIClient
+	client      nativeStackSubmitClient
 	owner       string
 	repo        string
 	prNumbers   []int
 	memberships map[int]*nativestacks.Membership
 	stacks      nativestacks.StackSet
+	prs         map[int]*nativestacks.PullRequest
 	plan        *nativestacks.Result
 	fallback    string
 }

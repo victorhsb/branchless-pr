@@ -148,15 +148,17 @@ native_stacks = off      # default: legacy behavior only
 Requirements for native mode:
 
 - The repository must have the GitHub native Stacks private preview enabled.
-- Native Stack writes require the `github/gh-stack` extension (`gh extension install github/gh-stack`).
-- Only multi-PR, same-repository stacks with 2-100 PRs are eligible.
+- Native Stack reads and writes use the documented REST API through the base `gh` CLI; no extension is required.
+- Only multi-PR, same-repository PR chains are eligible. branchless-pr conservatively limits native publication to 100 total PRs; GitHub currently documents 100 per create or append request, not an aggregate limit.
 
 Behavior by command:
 
-- `submit`/`export`: after ordinary PR/branch publication, creates, appends, or confirms a native Stack. Uses force-with-lease pushes to avoid overwriting server-side rebases. `--dry-run` reports the planned native action without making GitHub writes.
+- `submit`/`export`: after ordinary PR/branch publication, creates via `POST /stacks`, appends via `POST /stacks/{number}/add`, or confirms a native Stack. Returned membership must exactly match the intended bottom-to-top sequence. Uses force-with-lease pushes to avoid overwriting server-side rebases. `--dry-run` reports the planned native action without making GitHub writes.
 - `view`: shows native Stack number, position, size, and base in text and JSON output.
 - `land`: refuses to land a stack that exactly matches a native Stack; merge must be initiated in the GitHub UI until a supported CLI landing contract exists.
-- `abandon`: unlinks a matching native Stack via `gh stack unstack` before deleting generated remote branches.
+- `abandon`: calls `POST /stacks/{number}/unstack` before deleting generated remote branches, handling both partial `200` and dissolved `204` results.
+
+Native writes are not blindly retried. If a transport or server failure leaves the outcome uncertain, branchless-pr reads the current Stack and reconciles the observed sequence first.
 
 > **Synchronization limitation:** Using GitHub's Rebase Stack or merge controls can rewrite generated remote branches and leave the branchless-pr local commit stack stale. Recovery requires manual synchronization; native `land` is blocked until GitHub documents a supported non-interactive merge interface.
 
@@ -330,4 +332,3 @@ style = bottom-only
 ```
 
 Setting `land.style = disable` removes the `land` subcommand entirely.
-

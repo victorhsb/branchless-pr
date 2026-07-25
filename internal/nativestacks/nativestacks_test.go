@@ -1,90 +1,6 @@
 package nativestacks
 
-import (
-	"testing"
-)
-
-func TestParseExtensionList(t *testing.T) {
-	cases := []struct {
-		name          string
-		input         string
-		wantInstalled bool
-		wantVersion   string
-	}{
-		{
-			name:          "gh 2.88 format with version",
-			input:         "gh stack\tgithub/gh-stack\tv0.0.8\n",
-			wantInstalled: true,
-			wantVersion:   "0.0.8",
-		},
-		{
-			name:          "gh 2.88 format with multiple extensions",
-			input:         "gh other\tsome/other-ext\tv1.0.0\ngh stack\tgithub/gh-stack\tv0.0.8\n",
-			wantInstalled: true,
-			wantVersion:   "0.0.8",
-		},
-		{
-			name:          "fork of gh-stack",
-			input:         "gh stack\tmyuser/gh-stack\tv0.0.9\n",
-			wantInstalled: true,
-			wantVersion:   "0.0.9",
-		},
-		{
-			name:          "no gh-stack installed",
-			input:         "gh other\tsome/other-ext\tv1.0.0\n",
-			wantInstalled: false,
-			wantVersion:   "",
-		},
-		{
-			name:          "empty output",
-			input:         "",
-			wantInstalled: false,
-			wantVersion:   "",
-		},
-		{
-			name:          "gh-stack without version field",
-			input:         "gh stack\tgithub/gh-stack\n",
-			wantInstalled: true,
-			wantVersion:   "",
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := parseExtensionList(c.input)
-			if got.Installed != c.wantInstalled {
-				t.Errorf("Installed = %v, want %v", got.Installed, c.wantInstalled)
-			}
-			if got.Version != c.wantVersion {
-				t.Errorf("Version = %q, want %q", got.Version, c.wantVersion)
-			}
-		})
-	}
-}
-
-func TestValidateExtensionVersion(t *testing.T) {
-	cases := []struct {
-		version string
-		min     string
-		wantErr bool
-	}{
-		{"0.0.8", "0.0.8", false},
-		{"0.0.9", "0.0.8", false},
-		{"0.1.0", "0.0.8", false},
-		{"1.0.0", "0.0.8", false},
-		{"0.0.7", "0.0.8", true},
-		{"0.0.8", "0.0.9", true},
-		{"", "0.0.8", true},
-		{"v0.0.8", "0.0.8", false},
-		{"0.0.8-alpha", "0.0.8", true},
-		{"not-semver", "0.0.8", true},
-	}
-	for _, c := range cases {
-		err := ValidateExtensionVersion(c.version, c.min)
-		if (err != nil) != c.wantErr {
-			t.Errorf("ValidateExtensionVersion(%q, %q) err = %v, wantErr=%v", c.version, c.min, err, c.wantErr)
-		}
-	}
-}
+import "testing"
 
 func ptr(n int) *int { return &n }
 
@@ -129,10 +45,10 @@ func TestClassify(t *testing.T) {
 				30: {PRNumber: 30, StackNumber: ptr(5), Position: 3},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 3, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
-					{Number: 30, Position: 3},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
+					{Number: 30},
 				}},
 			},
 			wantKind:  ActionNoop,
@@ -147,10 +63,10 @@ func TestClassify(t *testing.T) {
 				30: {PRNumber: 30, StackNumber: ptr(5), Position: 3},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 3, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
-					{Number: 30, Position: 3},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
+					{Number: 30},
 				}},
 			},
 			wantKind:   ActionAppend,
@@ -165,10 +81,26 @@ func TestClassify(t *testing.T) {
 				20: {PRNumber: 20, StackNumber: ptr(5), Position: 2},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 3, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
-					{Number: 30, Position: 3},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
+					{Number: 30},
+				}},
+			},
+			wantKind: ActionConflict,
+		},
+		{
+			name:  "remote extra PR before unstacked local suffix conflicts",
+			local: []int{10, 40},
+			memberships: map[int]*Membership{
+				10: {PRNumber: 10, StackNumber: ptr(5), Position: 1},
+				40: {PRNumber: 40},
+			},
+			stacks: StackSet{
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
+					{Number: 30},
 				}},
 			},
 			wantKind: ActionConflict,
@@ -181,9 +113,9 @@ func TestClassify(t *testing.T) {
 				10: {PRNumber: 10, StackNumber: ptr(5), Position: 1},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 2, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
 				}},
 			},
 			wantKind: ActionConflict,
@@ -197,12 +129,12 @@ func TestClassify(t *testing.T) {
 				30: {PRNumber: 30, StackNumber: ptr(6), Position: 1},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 2, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
 				}},
-				6: {Number: 6, Base: StackRef{Ref: "main"}, Size: 1, PRs: []StackPR{
-					{Number: 30, Position: 1},
+				6: {Number: 6, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 30},
 				}},
 			},
 			wantKind: ActionConflict,
@@ -217,13 +149,13 @@ func TestClassify(t *testing.T) {
 				40: {PRNumber: 40, StackNumber: ptr(6), Position: 1},
 			},
 			stacks: StackSet{
-				5: {Number: 5, Base: StackRef{Ref: "main"}, Size: 3, PRs: []StackPR{
-					{Number: 10, Position: 1},
-					{Number: 20, Position: 2},
-					{Number: 30, Position: 3},
+				5: {Number: 5, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 10},
+					{Number: 20},
+					{Number: 30},
 				}},
-				6: {Number: 6, Base: StackRef{Ref: "main"}, Size: 1, PRs: []StackPR{
-					{Number: 40, Position: 1},
+				6: {Number: 6, Base: Ref{Ref: "main"}, PRs: []StackPR{
+					{Number: 40},
 				}},
 			},
 			wantKind: ActionConflict,
