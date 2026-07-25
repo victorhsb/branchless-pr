@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.11.0 - 2026-07-25
+
 - Added GitHub native Stacked PR integration via the `github.native_stacks`
   configuration (`off`, `auto`, `required`; default `off`). When enabled,
   `submit`/`export` reconciles the PR chain through the documented Stack REST
