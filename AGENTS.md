@@ -56,7 +56,7 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 
 ## Spec-driven workflow
 
-Behavioral specs live in `docs/specs/`. New behavioral changes currently still go through a change proposal in `openspec/changes/` using the `openspec-*` skills (propose → continue → apply → verify → archive); this workflow is being replaced by the LocalSpec workflow (`docs/plans/localspec.md`). When changing behavior, the corresponding `docs/specs/` section must agree.
+Behavioral specs live in `docs/specs/`. Behavioral changes go through the LocalSpec workflow: the `plan` skill writes a single-file plan to `docs/plans/<name>.md`, implementation updates code and specs together, and the `document` skill finalizes (verifies specs, prompts for ADRs in `docs/adr/`, deletes the plan). When changing behavior, the corresponding `docs/specs/` section must agree. The old OpenSpec workflow (`openspec/`) is being removed; see `docs/plans/localspec.md`.
 
 ## Conventions
 

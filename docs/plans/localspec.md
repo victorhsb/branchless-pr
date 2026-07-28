@@ -114,7 +114,7 @@ docs/
 1. **`plan` skill**
    - Input: Feature description
    - Reads: Relevant ADRs (constraints) + Specs (current behavior)
-   - Creates: `docs/plans/<date>-<name>.md`
+   - Creates: `docs/plans/<name>.md`
    - Output: Structured plan with tasks and spec impact
 
 2. **`document` skill**
@@ -146,9 +146,9 @@ docs/
 - [x] Verify no behavioral facts lost vs. git history
 
 ### Phase 2: Skill Creation
-- [ ] Create `.agents/skills/plan/SKILL.md`
-- [ ] Create `.agents/skills/document/SKILL.md`
-- [ ] Remove or deprecate openspec-* skills
+- [x] Create `.agents/skills/plan/SKILL.md`
+- [x] Create `.agents/skills/document/SKILL.md`
+- [x] Remove or deprecate openspec-* skills (deleted, along with the `.opencode/commands/opsx-*` slash commands that invoked them)
 
 ### Phase 3: Cleanup
 - [ ] Delete `openspec/` directory entirely (including changes/)
@@ -265,7 +265,11 @@ Tier selection rules:
 - **2026-07-28**: Specs use simplified, flexible template (not rigid structure)
 - **2026-07-28**: No `docs/plans/completed/` archive directory; plans are transient
 - **2026-07-28**: Specs use a tiered format (rules → tables → rare scenario blocks) instead of uniform GIVEN/WHEN/THEN scenarios; ~40–50% of the old corpus was scenario boilerplate. `docs/specs/view.md` is the reference exemplar.
+- **2026-07-28**: New skills live in `.agents/skills/` (tool-agnostic, consistent with `gh-stack`), not `.opencode/skills/`.
+- **2026-07-28**: openspec-* skills deleted outright (not deprecated); the `/opsx-*` slash commands that invoked them were deleted too. Git history preserves both.
+- **2026-07-28**: Plan files are named `docs/plans/<name>.md` (no date prefix; the date lives in frontmatter).
+- **2026-07-28**: `document` skill validates specs via agent judgment, not scripted diffing.
 
 ## Next Steps
 
-Ready to begin Phase 1: flatten `openspec/specs/` → `docs/specs/` using the simplified template, then extract constraints from AGENTS.md into initial ADRs via `adrm`.
+Phase 3 (Cleanup): delete `openspec/` entirely (including `changes/`), then finish the AGENTS.md workflow section so it describes only the LocalSpec workflow.

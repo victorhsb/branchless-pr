@@ -85,9 +85,9 @@ Native integration does not replace branchless-pr's commit-oriented local identi
 
 ### Explicit Go port behavior
 
-Native Stack integration is an explicit Go-port extension to the base behavior documented in `openspec/specs/`.
+Native Stack integration is an explicit Go-port extension to the base behavior documented in `docs/specs/`.
 
-- `github.native_stacks = off` and submit, export, view, land, or abandon runs → behavior remains compatible with the non-native algorithms in `openspec/specs/` (`submit-export`, `land`, `abandon`, and `view`).
+- `github.native_stacks = off` and submit, export, view, land, or abandon runs → behavior remains compatible with the non-native algorithms in `docs/specs/` (`submit-export`, `land`, `abandon`, and `view`).
 
 ### REST representation
 
