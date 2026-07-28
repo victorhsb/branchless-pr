@@ -1,408 +1,142 @@
+---
+title: GitHub native stacks
+status: stable
+---
+
 # GitHub Native Stacks
 
-## Purpose
+## Overview
 
 Define the opt-in integration between branchless-pr's commit-oriented stacks and GitHub's native Stack REST resources while preserving safe reconciliation, local metadata authority, and legacy behavior when the integration is disabled or unavailable.
-## Requirements
-### Requirement: Native Stack Integration Mode
-
-The system SHALL configure GitHub native Stack integration with `github.native_stacks` values `off`, `auto`, or `required`, and SHALL default to `off`.
-
-#### Scenario: Integration disabled by default
-- **GIVEN** `github.native_stacks` is unset or `off`
-- **WHEN** a stack command runs
-- **THEN** the command SHALL use legacy branchless-pr behavior
-- **AND** it SHALL NOT call a GitHub native Stacks endpoint
-
-#### Scenario: Auto mode uses supported native stacks
-- **GIVEN** `github.native_stacks = auto`
-- **AND** the repository supports GitHub native Stacks
-- **WHEN** an eligible stack command runs
-- **THEN** the command SHALL use the native behavior defined for that command
-
-#### Scenario: Auto mode falls back when unavailable
-- **GIVEN** `github.native_stacks = auto`
-- **AND** ordinary repository access succeeds
-- **AND** the repository-level GitHub Stacks endpoint reports that the feature is unavailable
-- **WHEN** an eligible stack command runs
-- **THEN** the command SHALL warn that native stacks are unavailable
-- **AND** it SHALL use legacy behavior
-
-#### Scenario: Required mode rejects unavailable feature
-- **GIVEN** `github.native_stacks = required`
-- **AND** the repository-level GitHub Stacks endpoint reports that the feature is unavailable
-- **WHEN** an eligible stack command runs
-- **THEN** the command SHALL fail before command-specific mutation
-
-#### Scenario: Base GitHub CLI supplies REST transport
-- **GIVEN** native integration is `auto` or `required`
-- **WHEN** a native read or write is required
-- **THEN** the system SHALL invoke the REST API through the base `gh api` command
-- **AND** it SHALL NOT require the `github/gh-stack` extension
-
-#### Scenario: Invalid mode rejected
-- **GIVEN** `github.native_stacks` has a value other than `off`, `auto`, or `required`
-- **WHEN** configuration is resolved
-- **THEN** the command SHALL return a configuration error
-
-### Requirement: Native Stack Eligibility
-
-The system SHALL publish only branchless-pr stacks that satisfy the documented native Stack request, repository, ref-chain, and PR-state constraints while preserving the one-commit-per-PR invariant (one commit maps to exactly one PR).
-
-#### Scenario: Multi-PR same-repository stack is eligible
-- **GIVEN** a branchless-pr stack contains between 2 and 100 PRs
-- **AND** every PR head belongs to the repository in the endpoint path
-- **AND** the bottom PR targets the ultimate Stack base
-- **AND** every later PR directly targets the previous PR's head
-- **AND** every PR to be added is open or draft, unmerged, not merge-queued, and not auto-merge-enabled
-- **WHEN** native eligibility is evaluated
-- **THEN** the stack SHALL be eligible for native reconciliation
-
-#### Scenario: Single PR remains standalone
-- **GIVEN** a branchless-pr stack contains exactly one PR
-- **WHEN** native eligibility is evaluated in any mode
-- **THEN** the PR SHALL remain a standalone PR
-- **AND** the system SHALL NOT create a GitHub Stack
-
-#### Scenario: Conservative aggregate limit in auto mode
-- **GIVEN** `github.native_stacks = auto`
-- **AND** a branchless-pr stack contains more than 100 PRs
-- **WHEN** native eligibility is evaluated
-- **THEN** the command SHALL warn that branchless-pr conservatively limits native Stacks to 100 total PRs
-- **AND** it SHALL continue with legacy behavior
-
-#### Scenario: Conservative aggregate limit in required mode
-- **GIVEN** `github.native_stacks = required`
-- **AND** a branchless-pr stack contains more than 100 PRs
-- **WHEN** native eligibility is evaluated
-- **THEN** the command SHALL fail before a native Stack write
-- **AND** the error SHALL identify 100 as a branchless-pr client policy rather than a documented GitHub aggregate limit
-
-#### Scenario: Cross-repository chain is ineligible
-- **GIVEN** Stack PR heads do not all belong to the repository in the endpoint path
-- **WHEN** native eligibility is evaluated
-- **THEN** the system SHALL NOT attempt to create or extend a native Stack
-- **AND** `auto` SHALL warn and use legacy behavior
-- **AND** `required` SHALL fail
-
-#### Scenario: Broken direct base chain is ineligible
-- **GIVEN** the bottom PR does not target the ultimate base or a later PR does not target the preceding PR's head
-- **WHEN** native eligibility is evaluated
-- **THEN** the system SHALL fail before a native Stack write
-- **AND** it SHALL report the mismatched PR and refs
-
-#### Scenario: Ineligible PR lifecycle blocks addition
-- **GIVEN** a PR to be created or appended is merged, closed-unmerged, merge-queued, or auto-merge-enabled
-- **WHEN** native eligibility is evaluated
-- **THEN** the system SHALL fail before a native Stack write
-- **AND** it SHALL preserve the server response as authoritative if GitHub applies stricter validation
-
-### Requirement: Native Stack Reconciliation Classification
-The system SHALL classify local and GitHub membership before writing a native Stack and SHALL preserve local PR order as authoritative.
-
-#### Scenario: Unstacked PRs classify as create
-- **GIVEN** every local PR is unstacked on GitHub
-- **WHEN** an eligible local sequence is classified
-- **THEN** the action SHALL be `create`
-- **AND** the create payload SHALL list PR numbers bottom-to-top
-
-#### Scenario: Exact sequence classifies as no-op
-- **GIVEN** every local PR belongs to one GitHub Stack
-- **AND** that Stack's complete PR sequence exactly equals the local bottom-to-top sequence
-- **WHEN** membership is classified
-- **THEN** the action SHALL be `noop`
-- **AND** no Stack write SHALL occur
-
-#### Scenario: Unstacked suffix classifies as append
-- **GIVEN** one GitHub Stack's complete PR sequence is an exact proper prefix of the local sequence
-- **AND** every local PR in the remaining suffix is unstacked
-- **WHEN** membership is classified
-- **THEN** the action SHALL be `append`
-- **AND** only the suffix PR numbers SHALL be sent to the append endpoint in bottom-to-top order
-
-#### Scenario: Remote sequence contains an extra PR
-- **GIVEN** the local sequence is a proper prefix of the GitHub Stack sequence
-- **WHEN** membership is classified
-- **THEN** the action SHALL be `conflict`
-- **AND** no Stack write SHALL occur
-
-#### Scenario: Reordered or mixed membership conflicts
-- **GIVEN** local PRs are reordered remotely, belong to multiple native Stacks, or contain a suffix PR already stacked elsewhere
-- **WHEN** membership is classified
-- **THEN** the action SHALL be `conflict`
-- **AND** the error SHALL describe the local and remote membership sufficiently for manual resolution
-
-### Requirement: Non-Destructive Native Reconciliation
-
-The system SHALL create or append native Stacks only for safe classifications, SHALL use the documented REST interface for writes, and SHALL NOT automatically replace a conflicting Stack.
-
-#### Scenario: Create native Stack
-- **GIVEN** reconciliation classifies an eligible stack as `create`
-- **WHEN** reconciliation is applied
-- **THEN** the system SHALL POST all local PR numbers bottom-to-top to `repos/{owner}/{repo}/stacks`
-- **AND** it SHALL pass PR numbers rather than branch names
-- **AND** it SHALL NOT modify PR lifecycle state as part of the Stack write
-
-#### Scenario: Append native Stack
-- **GIVEN** reconciliation classifies an eligible stack as `append`
-- **WHEN** reconciliation is applied
-- **THEN** the system SHALL POST only the unstacked local suffix to `repos/{owner}/{repo}/stacks/{stack_number}/add`
-- **AND** it SHALL preserve suffix bottom-to-top order
-- **AND** it SHALL NOT send the complete existing sequence
-
-#### Scenario: REST write is verified
-- **GIVEN** a create or append REST request returns successfully
-- **WHEN** reconciliation validates the result
-- **THEN** the complete returned or re-read remote PR sequence SHALL exactly equal the planned bottom-to-top sequence before the operation is considered successful
-
-#### Scenario: Stack write does not own PR lifecycle
-- **GIVEN** branchless-pr invokes a native Stack REST write
-- **WHEN** the endpoint processes existing PR numbers
-- **THEN** branchless-pr SHALL remain responsible for branch pushes, PR creation, PR title and body, reviewers, direct bases, and draft state
-
-#### Scenario: Conflict is never auto-recreated
-- **GIVEN** reconciliation classifies membership as `conflict`
-- **WHEN** reconciliation is applied in `auto` or `required` mode
-- **THEN** the command SHALL fail
-- **AND** it SHALL NOT unstack, replace, reorder, or append the conflicting GitHub Stack
-
-### Requirement: Native API Error Classification
-
-The system SHALL preserve REST failure context and distinguish feature unavailability from authentication, authorization, missing resources, validation, rate limiting, transport uncertainty, and malformed responses.
-
-#### Scenario: Documented endpoint unavailable
-- **GIVEN** ordinary access to the repository succeeds
-- **AND** the repository-level Stack list endpoint returns `404`
-- **WHEN** availability is probed
-- **THEN** the system SHALL classify native Stacks as unavailable
-
-#### Scenario: Numbered Stack not found
-- **GIVEN** a numbered Stack get, add, or unstack endpoint returns `404`
-- **WHEN** the failure is classified
-- **THEN** the system SHALL preserve the missing-resource context
-- **AND** it SHALL NOT classify that response as repository-level feature unavailability without a separate availability probe
-
-#### Scenario: Authentication or authorization error is not fallback
-- **GIVEN** GitHub returns `401` or `403`
-- **WHEN** native state is queried or mutated
-- **THEN** the system SHALL return the underlying status and GitHub diagnostic
-- **AND** it SHALL NOT silently classify the feature as unavailable
-
-#### Scenario: Validation failure is not blindly retried
-- **GIVEN** GitHub returns `422` for a create, append, or unstack request
-- **WHEN** the failure is classified
-- **THEN** the system SHALL preserve the status and GitHub message
-- **AND** it SHALL re-read relevant PR and Stack state before any new plan
-- **AND** it SHALL NOT repeat the same write blindly
-
-#### Scenario: Rate limit is preserved
-- **GIVEN** GitHub returns a rate-limit response
-- **WHEN** the failure is classified
-- **THEN** the system SHALL preserve the status and available retry diagnostics
-- **AND** it SHALL NOT relabel the response as feature unavailable
-
-#### Scenario: Transport or server failure after write is uncertain
-- **GIVEN** a native write ends with a transport failure or `5xx` response
-- **WHEN** the failure is classified
-- **THEN** the system SHALL mark the write outcome as uncertain
-- **AND** the next operation SHALL be read and reconciliation rather than an unconditional retry
-
-#### Scenario: Malformed API response fails safely
-- **GIVEN** a native Stack response cannot be decoded or violates required fields or ordering invariants
-- **WHEN** the response is processed
-- **THEN** the command SHALL return an error
-- **AND** it SHALL perform no native Stack write based on that response
-
-### Requirement: Local Commit Metadata Remains Authoritative
-Native integration SHALL NOT replace branchless-pr's commit-oriented local identity model.
-
-#### Scenario: Successful native reconciliation preserves metadata
-- **GIVEN** native reconciliation creates, appends, or confirms a GitHub Stack
-- **WHEN** submit/export completes
-- **THEN** every submitted commit SHALL retain its `stack-info` PR and generated-branch metadata
-- **AND** subsequent local discovery SHALL continue to use `BASE..HEAD`
-
-#### Scenario: Generic native Stack is not imported
-- **GIVEN** a GitHub native Stack was not constructed from the current branchless-pr commit stack
-- **WHEN** branchless-pr encounters it
-- **THEN** branchless-pr SHALL NOT infer or rewrite local commits solely from that remote Stack
-
-### Requirement: Explicit Go Port Behavior
-GitHub native Stack integration SHALL be an explicit Go-port extension to the base behavior documented in `openspec/specs/`.
-
-#### Scenario: Legacy compatibility when disabled
-- **GIVEN** `github.native_stacks = off`
-- **WHEN** submit, export, view, land, or abandon runs
-- **THEN** behavior SHALL remain compatible with the non-native algorithms in `openspec/specs/` (`submit-export`, `land`, `abandon`, and `view`)
-
-### Requirement: Native REST Representation
-
-The system SHALL decode and validate the published pull-request membership and Stack resource schemas (implemented in `internal/nativestacks`; see `REST_ACCEPTANCE_TEST_MATRIX.md` for acceptance evidence).
-
-#### Scenario: Stacked pull request membership is decoded
-
-- **GIVEN** a pull-request resource contains `stack.id`, `stack.number`, `stack.size`, `stack.position`, `stack.base.ref`, and `stack.base.sha`
-- **WHEN** native membership is decoded
-- **THEN** the system SHALL preserve the global ID and repository-scoped Stack number as distinct values
-- **AND** it SHALL interpret position as 1-based bottom-to-top order
-- **AND** it SHALL distinguish the PR's direct `base.ref` from the Stack's ultimate `stack.base.ref`
-
-#### Scenario: Standalone pull request is decoded
-
-- **GIVEN** a pull-request resource contains `stack: null`
-- **WHEN** native membership is decoded
-- **THEN** the system SHALL classify the PR as unstacked
-
-#### Scenario: Complete Stack resource is decoded
-
-- **GIVEN** a Stack resource contains `id`, `number`, `node_id`, `url`, `base.ref`, `open`, `created_at`, and `pull_requests`
-- **WHEN** the Stack is decoded
-- **THEN** the system SHALL preserve the `pull_requests` array in returned bottom-to-top order
-- **AND** each member SHALL decode `number`, `state`, `draft`, nullable `merged_at`, `head.ref`, and `head.sha`
-- **AND** the system SHALL NOT require `base.sha` on the Stack resource
-
-#### Scenario: Unknown fields are tolerated
-
-- **GIVEN** a pull-request membership or Stack response contains additional preview fields
-- **WHEN** the response is decoded
-- **THEN** the system SHALL ignore the unknown fields
-- **AND** it SHALL continue to validate every documented required field
-
-#### Scenario: Malformed or ambiguous resource fails closed
-
-- **GIVEN** a response omits a required field, contains an impossible membership position, contains duplicate PR numbers, or cannot be decoded
-- **WHEN** native state is processed
-- **THEN** the system SHALL return a schema error
-- **AND** it SHALL perform no native Stack write based on that response
-
-#### Scenario: Merged and closed-unmerged members remain distinct
-
-- **GIVEN** a Stack member has `state: "closed"`
-- **WHEN** the member lifecycle is classified
-- **THEN** `merged_at != null` SHALL classify the member as merged
-- **AND** `merged_at == null` SHALL classify the member as closed but unmerged
-
-### Requirement: Native REST Read Contract
-
-The system SHALL use the canonical repository-scoped REST paths and complete remote resources needed for safe native reconciliation.
-
-#### Scenario: Repository availability is probed safely
 
-- **GIVEN** native integration is enabled
-- **WHEN** repository support is probed
-- **THEN** the system SHALL first confirm ordinary repository access
-- **AND** it SHALL then query the repository-level Stack list endpoint
-- **AND** only a Stack-list `404` after successful repository access SHALL be classified as feature unavailable
-
-#### Scenario: Candidate pull requests are loaded
+## Behavior
 
-- **GIVEN** local entries already have PR numbers
-- **WHEN** native reconciliation is planned
-- **THEN** the system SHALL load each candidate PR from the repository
-- **AND** it SHALL validate repository identity, state, head ref, direct base ref, and nullable Stack membership
-
-#### Scenario: Complete referenced Stack is loaded
+### Integration mode
 
-- **GIVEN** one or more candidate PRs contain Stack membership
-- **WHEN** native reconciliation is planned
-- **THEN** the system SHALL load every unique referenced Stack by its repository-scoped `stack.number`
-- **AND** it SHALL NOT infer the complete ordered member list from membership `size` and `position`
-
-#### Scenario: Filtered membership lookup
-
-- **GIVEN** the system must rediscover a Stack containing a known PR
-- **WHEN** it queries the Stack list endpoint with `pull_request={number}`
-- **THEN** an empty array SHALL mean the PR is unstacked
-- **AND** one result SHALL identify the Stack
-- **AND** more than one result SHALL be treated as ambiguous membership
-
-#### Scenario: Full Stack listing is paginated
-
-- **GIVEN** an operation enumerates repository Stacks rather than using a filtered lookup
-- **WHEN** the Stack list spans multiple pages
-- **THEN** the system SHALL follow GitHub pagination until no next page remains
-- **AND** it SHALL NOT treat one page as the complete repository set
-
-### Requirement: Native REST Mutation Contract
-
-The system SHALL create, append, and unstack native Stacks through the documented REST endpoints using JSON request bodies and repository-scoped identifiers.
-
-#### Scenario: REST create request
-
-- **GIVEN** reconciliation classifies an eligible sequence as `create`
-- **WHEN** the native Stack is created
-- **THEN** the system SHALL POST `{"pull_requests":[...]}` to `repos/{owner}/{repo}/stacks`
-- **AND** the array SHALL contain 2 through 100 PR numbers in bottom-to-top order
-- **AND** a successful response SHALL be `201` with the created Stack resource
-
-#### Scenario: REST append request
-
-- **GIVEN** reconciliation classifies an eligible suffix as `append`
-- **WHEN** the native Stack is extended
-- **THEN** the system SHALL POST `{"pull_requests":[...]}` to `repos/{owner}/{repo}/stacks/{stack_number}/add`
-- **AND** the array SHALL contain only 1 through 100 new suffix PR numbers from the current top upward
-- **AND** a successful response SHALL be `200` with the updated Stack resource
-
-#### Scenario: REST partial unstack response
-
-- **GIVEN** an unstack request leaves one or more server-locked members
-- **WHEN** the system POSTs with no body to `repos/{owner}/{repo}/stacks/{stack_number}/unstack`
-- **THEN** it SHALL accept `200`
-- **AND** it SHALL decode and report the returned surviving Stack
-- **AND** it SHALL NOT assume the Stack was dissolved
-
-#### Scenario: REST dissolved unstack response
-
-- **GIVEN** an unstack request removes every member
-- **WHEN** the system POSTs with no body to `repos/{owner}/{repo}/stacks/{stack_number}/unstack`
-- **THEN** it SHALL accept `204` with an empty body
-- **AND** it SHALL classify the Stack as dissolved
-
-#### Scenario: Unsupported structural edits are refused
-
-- **GIVEN** the desired change requires insertion below the top, arbitrary removal, movement, reorder, replacement, rebase, or merge
-- **WHEN** native reconciliation is planned
-- **THEN** the system SHALL NOT emulate that operation with REST appends
-- **AND** it SHALL report the operation as unsupported or conflicting
-
-### Requirement: Native Write Concurrency and Recovery
-
-The system SHALL treat native Stack mutations as non-idempotent read-modify-write operations and SHALL reconcile uncertain outcomes before any retry.
-
-#### Scenario: Successful write response is verified
-
-- **GIVEN** create or append returns a successful Stack resource
-- **WHEN** the response is validated
-- **THEN** its complete bottom-to-top PR sequence SHALL exactly equal the intended sequence
-- **AND** the operation SHALL fail as conflicting if it does not
-
-#### Scenario: Create outcome is uncertain
-
-- **GIVEN** a create request fails after its server outcome becomes uncertain
-- **WHEN** the system handles the failure
-- **THEN** it SHALL query membership for a candidate PR and load any resulting complete Stack
-- **AND** it SHALL accept an exact intended sequence as completed
-- **AND** it SHALL NOT blindly repeat the create request
-
-#### Scenario: Append outcome is uncertain
-
-- **GIVEN** an append request fails after its server outcome becomes uncertain
-- **WHEN** the system handles the failure
-- **THEN** it SHALL reload the numbered Stack and recompute the ordered relationship
-- **AND** it SHALL accept an exact intended sequence as completed
-- **AND** it SHALL NOT blindly repeat the append request
-
-#### Scenario: Unstack outcome is uncertain
-
-- **GIVEN** an unstack request fails after its server outcome becomes uncertain
-- **WHEN** the system handles the failure
-- **THEN** it SHALL reload the numbered Stack
-- **AND** it SHALL distinguish a dissolved Stack, a partial Stack, and an unverified result
-- **AND** it SHALL NOT blindly repeat the unstack request
-
-#### Scenario: Server-side branch rewrite is protected
-
-- **GIVEN** GitHub rebases or retargets remaining Stack branches
-- **WHEN** branchless-pr later updates a generated remote branch
-- **THEN** it SHALL use the previously observed remote OID as a force-with-lease expectation
-- **AND** it SHALL fail rather than overwrite an unexpected server-side rewrite
+`github.native_stacks` takes values `off`, `auto`, or `required` and defaults to `off`.
+
+| Mode | Repository feature state | Behavior |
+|------|--------------------------|----------|
+| unset or `off` | any | use legacy branchless-pr behavior; never call a GitHub native Stacks endpoint |
+| `auto` | native Stacks supported | use the native behavior defined for that command |
+| `auto` | ordinary repository access succeeds but the repository-level GitHub Stacks endpoint reports the feature unavailable | warn that native stacks are unavailable; use legacy behavior |
+| `required` | repository-level GitHub Stacks endpoint reports the feature unavailable | fail before command-specific mutation |
+
+- `github.native_stacks` has a value other than `off`, `auto`, or `required` → configuration error when configuration is resolved.
+- Native integration is `auto` or `required` and a native read or write is required → invoke the REST API through the base `gh api` command; never require the `github/gh-stack` extension.
+
+### Eligibility
+
+Only branchless-pr stacks satisfying the documented native Stack request, repository, ref-chain, and PR-state constraints are published, preserving the one-commit-per-PR invariant (one commit maps to exactly one PR).
+
+- Stack contains between 2 and 100 PRs, every PR head belongs to the repository in the endpoint path, the bottom PR targets the ultimate Stack base, every later PR directly targets the previous PR's head, and every PR to be added is open or draft, unmerged, not merge-queued, and not auto-merge-enabled → eligible for native reconciliation.
+- Stack contains exactly one PR → the PR remains a standalone PR in any mode; no GitHub Stack is created.
+
+| Condition | `auto` | `required` |
+|-----------|--------|------------|
+| Stack contains more than 100 PRs | warn that branchless-pr conservatively limits native Stacks to 100 total PRs; continue with legacy behavior | fail before a native Stack write; the error identifies 100 as a branchless-pr client policy rather than a documented GitHub aggregate limit |
+| Stack PR heads do not all belong to the repository in the endpoint path | do not attempt to create or extend a native Stack; warn and use legacy behavior | do not attempt to create or extend a native Stack; fail |
+
+- Bottom PR does not target the ultimate base, or a later PR does not target the preceding PR's head → fail before a native Stack write and report the mismatched PR and refs.
+- A PR to be created or appended is merged, closed-unmerged, merge-queued, or auto-merge-enabled → fail before a native Stack write; preserve the server response as authoritative if GitHub applies stricter validation.
+
+### Reconciliation classification
+
+Local and GitHub membership are classified before writing a native Stack; local PR order is authoritative.
+
+| Local vs remote membership | Action | Details |
+|---------------------------|--------|---------|
+| Every local PR is unstacked on GitHub | `create` | create payload lists PR numbers bottom-to-top |
+| Every local PR belongs to one GitHub Stack whose complete PR sequence exactly equals the local bottom-to-top sequence | `noop` | no Stack write occurs |
+| One GitHub Stack's complete PR sequence is an exact proper prefix of the local sequence and every local PR in the remaining suffix is unstacked | `append` | only the suffix PR numbers are sent to the append endpoint, bottom-to-top |
+| The local sequence is a proper prefix of the GitHub Stack sequence | `conflict` | no Stack write occurs |
+| Local PRs are reordered remotely, belong to multiple native Stacks, or contain a suffix PR already stacked elsewhere | `conflict` | error describes the local and remote membership sufficiently for manual resolution |
+
+### Non-destructive reconciliation
+
+Native Stacks are created or appended only for safe classifications, writes use the documented REST interface, and a conflicting Stack is never automatically replaced.
+
+- Classification is `create` → POST all local PR numbers bottom-to-top to `repos/{owner}/{repo}/stacks`; pass PR numbers rather than branch names; do not modify PR lifecycle state as part of the Stack write.
+- Classification is `append` → POST only the unstacked local suffix to `repos/{owner}/{repo}/stacks/{stack_number}/add`, preserving suffix bottom-to-top order; never send the complete existing sequence.
+- A create or append REST request returns successfully → the complete returned or re-read remote PR sequence must exactly equal the planned bottom-to-top sequence before the operation is considered successful.
+- branchless-pr invokes a native Stack REST write → branchless-pr remains responsible for branch pushes, PR creation, PR title and body, reviewers, direct bases, and draft state.
+- Classification is `conflict` in `auto` or `required` mode → fail; never unstack, replace, reorder, or append the conflicting GitHub Stack.
+
+### API error classification
+
+REST failure context is preserved, distinguishing feature unavailability from authentication, authorization, missing resources, validation, rate limiting, transport uncertainty, and malformed responses.
+
+| GitHub response | Behavior |
+|-----------------|----------|
+| Repository-level Stack list endpoint returns `404` after ordinary repository access succeeds | classify native Stacks as unavailable |
+| Numbered Stack get, add, or unstack endpoint returns `404` | preserve the missing-resource context; never classify that response as repository-level feature unavailability without a separate availability probe |
+| `401` or `403` | return the underlying status and GitHub diagnostic; never silently classify the feature as unavailable |
+| `422` for a create, append, or unstack request | preserve the status and GitHub message; re-read relevant PR and Stack state before any new plan; never repeat the same write blindly |
+| Rate-limit response | preserve the status and available retry diagnostics; never relabel the response as feature unavailable |
+| Transport failure or `5xx` after a native write | mark the write outcome as uncertain; the next operation is read and reconciliation rather than an unconditional retry |
+| Response cannot be decoded or violates required fields or ordering invariants | return an error; perform no native Stack write based on that response |
+
+### Local commit metadata authority
+
+Native integration does not replace branchless-pr's commit-oriented local identity model.
+
+- Native reconciliation creates, appends, or confirms a GitHub Stack and submit/export completes → every submitted commit retains its `stack-info` PR and generated-branch metadata, and subsequent local discovery continues to use `BASE..HEAD`.
+- A GitHub native Stack was not constructed from the current branchless-pr commit stack → never infer or rewrite local commits solely from that remote Stack.
+
+### Explicit Go port behavior
+
+Native Stack integration is an explicit Go-port extension to the base behavior documented in `openspec/specs/`.
+
+- `github.native_stacks = off` and submit, export, view, land, or abandon runs → behavior remains compatible with the non-native algorithms in `openspec/specs/` (`submit-export`, `land`, `abandon`, and `view`).
+
+### REST representation
+
+The published pull-request membership and Stack resource schemas are decoded and validated (implemented in `internal/nativestacks`; see `REST_ACCEPTANCE_TEST_MATRIX.md` for acceptance evidence).
+
+- Pull-request resource contains `stack.id`, `stack.number`, `stack.size`, `stack.position`, `stack.base.ref`, and `stack.base.sha` → preserve the global ID and repository-scoped Stack number as distinct values, interpret position as 1-based bottom-to-top order, and distinguish the PR's direct `base.ref` from the Stack's ultimate `stack.base.ref`.
+- Pull-request resource contains `stack: null` → classify the PR as unstacked.
+- Stack resource contains `id`, `number`, `node_id`, `url`, `base.ref`, `open`, `created_at`, and `pull_requests` → preserve the `pull_requests` array in returned bottom-to-top order; each member decodes `number`, `state`, `draft`, nullable `merged_at`, `head.ref`, and `head.sha`; do not require `base.sha` on the Stack resource.
+- Membership or Stack response contains additional preview fields → ignore the unknown fields and continue to validate every documented required field.
+- Response omits a required field, contains an impossible membership position, contains duplicate PR numbers, or cannot be decoded → return a schema error; perform no native Stack write based on that response.
+- Stack member has `state: "closed"` → `merged_at != null` classifies the member as merged; `merged_at == null` classifies the member as closed but unmerged.
+
+### REST read contract
+
+Reconciliation uses the canonical repository-scoped REST paths and complete remote resources.
+
+- Repository support is probed → first confirm ordinary repository access, then query the repository-level Stack list endpoint; only a Stack-list `404` after successful repository access is classified as feature unavailable.
+- Local entries already have PR numbers → load each candidate PR from the repository and validate repository identity, state, head ref, direct base ref, and nullable Stack membership.
+- One or more candidate PRs contain Stack membership → load every unique referenced Stack by its repository-scoped `stack.number`; never infer the complete ordered member list from membership `size` and `position`.
+
+| `pull_request={number}` list-endpoint result | Meaning |
+|----------------------------------------------|---------|
+| empty array | the PR is unstacked |
+| one result | identifies the Stack |
+| more than one result | ambiguous membership |
+
+- An operation enumerates repository Stacks rather than using a filtered lookup and the Stack list spans multiple pages → follow GitHub pagination until no next page remains; never treat one page as the complete repository set.
+
+### REST mutation contract
+
+Native Stacks are created, appended, and unstacked through the documented REST endpoints using JSON request bodies and repository-scoped identifiers.
+
+- Classification is `create` → POST `{"pull_requests":[...]}` to `repos/{owner}/{repo}/stacks`; the array contains 2 through 100 PR numbers in bottom-to-top order; a successful response is `201` with the created Stack resource.
+- Classification is `append` → POST `{"pull_requests":[...]}` to `repos/{owner}/{repo}/stacks/{stack_number}/add`; the array contains only 1 through 100 new suffix PR numbers from the current top upward; a successful response is `200` with the updated Stack resource.
+- Unstack is requested → POST with no body to `repos/{owner}/{repo}/stacks/{stack_number}/unstack`.
+
+| Unstack outcome | Response | Behavior |
+|-----------------|----------|----------|
+| One or more server-locked members remain | `200` | decode and report the returned surviving Stack; never assume the Stack was dissolved |
+| Every member removed | `204` with an empty body | classify the Stack as dissolved |
+
+- The desired change requires insertion below the top, arbitrary removal, movement, reorder, replacement, rebase, or merge → never emulate that operation with REST appends; report the operation as unsupported or conflicting.
+
+### Write concurrency and recovery
+
+Native Stack mutations are non-idempotent read-modify-write operations; uncertain outcomes are reconciled before any retry.
+
+- Create or append returns a successful Stack resource → its complete bottom-to-top PR sequence must exactly equal the intended sequence; fail as conflicting if it does not.
+- A create request fails after its server outcome becomes uncertain → query membership for a candidate PR and load any resulting complete Stack; accept an exact intended sequence as completed; never blindly repeat the create request.
+- An append request fails after its server outcome becomes uncertain → reload the numbered Stack and recompute the ordered relationship; accept an exact intended sequence as completed; never blindly repeat the append request.
+- An unstack request fails after its server outcome becomes uncertain → reload the numbered Stack and distinguish a dissolved Stack, a partial Stack, and an unverified result; never blindly repeat the unstack request.
+- GitHub rebases or retargets remaining Stack branches and branchless-pr later updates a generated remote branch → use the previously observed remote OID as a force-with-lease expectation; fail rather than overwrite an unexpected server-side rewrite.

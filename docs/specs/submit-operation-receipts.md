@@ -1,226 +1,93 @@
-# submit-operation-receipts Specification
+---
+title: Submit operation receipts
+status: stable
+---
 
-## Purpose
+# Submit operation receipts
 
-Provide an opt-in machine-readable receipt for real submit/export executions so callers can inspect completed side effects, failures, and recovery attempts.
+## Overview
 
-## Requirements
+Provide an opt-in machine-readable receipt for real submit/export executions so callers can inspect completed side effects, failures, and recovery attempts. Each receipt is a single JSON object with a stable, versioned schema.
 
-### Requirement: Submit Receipt Request
+## Behavior
 
-The `stack-pr submit` command and its `export` alias SHALL support an opt-in receipt destination for real submit/export executions.
+### Receipt request
 
-#### Scenario: Receipt flag is accepted on submit
+The `submit` command and its `export` alias support an opt-in receipt destination for real submit/export executions.
 
-- **WHEN** `stack-pr submit --receipt <destination>` is invoked without `--dry-run`
-- **THEN** the command SHALL attempt to emit a submit operation receipt to `<destination>`
+- `stack-pr submit --receipt <destination>` is invoked without `--dry-run` → attempt to emit a submit operation receipt to `<destination>`.
+- `stack-pr export --receipt <destination>` is invoked without `--dry-run` → emit the same submit operation receipt as `stack-pr submit --receipt <destination>`.
+- `stack-pr submit` is invoked without a receipt flag and without receipt configuration → emit no receipt; existing human output behavior remains unchanged.
 
-#### Scenario: Receipt flag is accepted on export alias
+| Receipt destination | Behavior |
+|---------------------|----------|
+| `off` | disable receipt emission |
+| `-` | emit one JSON receipt document on standard output |
+| any other value | interpret as a filesystem path where the receipt JSON document is written |
 
-- **WHEN** `stack-pr export --receipt <destination>` is invoked without `--dry-run`
-- **THEN** the command SHALL attempt to emit the same submit operation receipt as `stack-pr submit --receipt <destination>`
+- `stack-pr submit --dry-run --receipt <destination>` is invoked with a destination other than `off` → report a clear invocation error explaining that operation receipts are only available for real submit/export executions, and perform no submit/export mutations.
 
-#### Scenario: Receipt disabled by default
+### Receipt configuration
 
-- **WHEN** `stack-pr submit` is invoked without a receipt flag and without receipt configuration
-- **THEN** the command SHALL NOT emit a receipt
-- **AND** existing human output behavior SHALL remain unchanged
+`.stack-pr.cfg` configures default submit/export receipt behavior.
 
-#### Scenario: Receipt destination values
+- `.stack-pr.cfg` contains `receipt.submit = <destination>` and `stack-pr submit` is invoked without `--receipt` → use `<destination>` as the effective receipt destination.
+- `.stack-pr.cfg` contains `receipt.submit = <destination>` and `stack-pr export` is invoked without `--receipt` → use `<destination>` as the effective receipt destination.
+- `.stack-pr.cfg` contains `receipt.submit = <configured-destination>` and `stack-pr submit --receipt <flag-destination>` is invoked → use `<flag-destination>` as the effective receipt destination.
+- `.stack-pr.cfg` omits `receipt.submit` → the effective receipt destination is `off`.
 
-- **WHEN** a receipt destination is provided
-- **THEN** `off` SHALL disable receipt emission
-- **AND** `-` SHALL emit one JSON receipt document on standard output
-- **AND** any other value SHALL be interpreted as a filesystem path where the receipt JSON document is written
+### Receipt JSON envelope
 
-#### Scenario: Dry-run receipt rejected
+- A submit operation receipt is emitted → the JSON object includes `schema_version`, `command`, `status`, `side_effects`, `repo`, `stack`, and `operations`.
+- `schema_version` is a non-empty string; `command` identifies the invoked operation as `stack-pr submit` or `stack-pr export`; `side_effects` is `true`.
+- `status` is one of `ok`, `failed`, or `partial_failure`.
+- A submit operation receipt is emitted → `repo` includes the resolved repository root, original branch, remote, target, base, head, and branch-name template when those values are available.
+- A submit operation receipt is emitted after stack discovery succeeds → `stack` includes the stack size and per-entry commit SHA, title, head branch, base branch, and PR URL when known.
+- The effective receipt destination is `-` → standard output contains exactly one valid JSON receipt document; human progress output is not interleaved into standard output.
 
-- **WHEN** `stack-pr submit --dry-run --receipt <destination>` is invoked with a destination other than `off`
-- **THEN** the command SHALL report a clear invocation error explaining that operation receipts are only available for real submit/export executions
-- **AND** the command SHALL NOT perform submit/export mutations
+### Receipt operation entries
 
-### Requirement: Receipt Configuration
+The receipt records high-value submit/export side effects in execution order.
 
-The CLI SHALL support `.stack-pr.cfg` configuration for default submit/export receipt behavior.
+- Submit/export successfully completes a side-effecting operation → append an operation entry with `type`, `status`, and operation-specific details; `status` is `ok`.
+- Submit/export fails during a side-effecting operation after receipt collection begins → append or update an operation entry for the failed operation with `status` set to `failed` and an error message.
+- A receipt contains at least one successful side-effect operation followed by a failed operation → the top-level receipt `status` is `partial_failure`.
+- Submit/export fails before any side-effect operation succeeds and a receipt can be emitted → the top-level receipt `status` is `failed`.
+- Submit/export completes successfully → the top-level receipt `status` is `ok`.
 
-#### Scenario: Receipt config enables submit receipts
+### Submit operation coverage
 
-- **WHEN** `.stack-pr.cfg` contains `receipt.submit = <destination>`
-- **AND** `stack-pr submit` is invoked without `--receipt`
-- **THEN** the command SHALL use `<destination>` as the effective receipt destination
+Receipts record the main categories of submit/export side effects.
 
-#### Scenario: Receipt config supports export alias
+- Submit/export creates or checks out generated stack branches → record branch operation entries identifying the affected branch names and commits when available.
+- Submit/export force-pushes generated stack branches → record push operation entries identifying the remote and branch names.
+- Submit/export creates or updates a pull request → record pull request operation entries identifying the commit, head branch, base branch, title, and PR URL when available.
+- Submit/export amends commits to add `stack-info` metadata → record metadata operation entries identifying the affected head branch and commit when available.
+- Submit/export performs a best-effort cleanup operation that fails without failing the command → record a warning operation entry identifying the cleanup operation and error message.
 
-- **WHEN** `.stack-pr.cfg` contains `receipt.submit = <destination>`
-- **AND** `stack-pr export` is invoked without `--receipt`
-- **THEN** the command SHALL use `<destination>` as the effective receipt destination
+### Recovery recording
 
-#### Scenario: Receipt flag overrides config
+Receipts record best-effort recovery attempts made after handled errors.
 
-- **WHEN** `.stack-pr.cfg` contains `receipt.submit = <configured-destination>`
-- **AND** `stack-pr submit --receipt <flag-destination>` is invoked
-- **THEN** the command SHALL use `<flag-destination>` as the effective receipt destination
+- Submit/export fails and recovery attempts to checkout the original branch → record a recovery operation entry with the target original branch and success or failure status.
+- Submit/export fails after an auto-stash was created and recovery attempts to pop the stash → record a recovery operation entry with success or failure status.
 
-#### Scenario: Receipt config default is off
+### Receipt emission failure
 
-- **WHEN** `.stack-pr.cfg` omits `receipt.submit`
-- **THEN** the effective receipt destination SHALL be `off`
+Receipt emission failures are visible to callers.
 
-### Requirement: Receipt JSON Envelope
+- The effective receipt destination is a filesystem path and the receipt JSON document cannot be written to that path → return a non-zero error explaining that receipt emission failed.
+- The effective receipt destination is `off` → do not attempt to write a receipt.
 
-Each submit operation receipt SHALL be a single JSON object with a stable, versioned schema.
+### Native Stack receipt operations
 
-#### Scenario: Required receipt fields
+When native integration is enabled, receipts record the outcome of native Stack planning and reconciliation. All rows below assume receipt emission is enabled.
 
-- **WHEN** a submit operation receipt is emitted
-- **THEN** the JSON object SHALL include `schema_version`, `command`, `status`, `side_effects`, `repo`, `stack`, and `operations`
-- **AND** `schema_version` SHALL be a non-empty string
-- **AND** `command` SHALL identify the invoked operation as `stack-pr submit` or `stack-pr export`
-- **AND** `side_effects` SHALL be `true`
+| Native reconciliation outcome | Receipt content |
+|-------------------------------|-----------------|
+| Submit/export creates a GitHub native Stack | `ok` operation containing the action `create`, Stack number, and ordered PR numbers |
+| Submit/export appends PRs to a GitHub native Stack | `ok` operation containing the action `append`, Stack number, and appended PR numbers |
+| Native reconciliation is a no-op | `ok` operation containing the action `noop` and Stack number |
 
-#### Scenario: Receipt status values
-
-- **WHEN** a submit operation receipt is emitted
-- **THEN** `status` SHALL be one of `ok`, `failed`, or `partial_failure`
-
-#### Scenario: Repository context included
-
-- **WHEN** a submit operation receipt is emitted
-- **THEN** `repo` SHALL include the resolved repository root, original branch, remote, target, base, head, and branch-name template when those values are available
-
-#### Scenario: Stack context included
-
-- **WHEN** a submit operation receipt is emitted after stack discovery succeeds
-- **THEN** `stack` SHALL include the stack size and per-entry commit SHA, title, head branch, base branch, and PR URL when known
-
-#### Scenario: Stable JSON stdout mode
-
-- **WHEN** the effective receipt destination is `-`
-- **THEN** standard output SHALL contain exactly one valid JSON receipt document
-- **AND** human progress output SHALL NOT be interleaved into standard output
-
-### Requirement: Receipt Operation Entries
-
-The receipt SHALL record high-value submit/export side effects in execution order.
-
-#### Scenario: Successful side effects are recorded
-
-- **WHEN** submit/export successfully completes a side-effecting operation
-- **THEN** the receipt SHALL append an operation entry with `type`, `status`, and operation-specific details
-- **AND** `status` SHALL be `ok`
-
-#### Scenario: Failed operation is recorded
-
-- **WHEN** submit/export fails during a side-effecting operation after receipt collection begins
-- **THEN** the receipt SHALL append or update an operation entry for the failed operation
-- **AND** that operation entry SHALL have `status` set to `failed`
-- **AND** that operation entry SHALL include an error message
-
-#### Scenario: Partial failure status
-
-- **WHEN** a receipt contains at least one successful side-effect operation followed by a failed operation
-- **THEN** the top-level receipt `status` SHALL be `partial_failure`
-
-#### Scenario: Failed status without completed side effects
-
-- **WHEN** submit/export fails before any side-effect operation succeeds and a receipt can be emitted
-- **THEN** the top-level receipt `status` SHALL be `failed`
-
-#### Scenario: Successful status
-
-- **WHEN** submit/export completes successfully
-- **THEN** the top-level receipt `status` SHALL be `ok`
-
-### Requirement: Submit Operation Coverage
-
-Submit/export receipts SHALL record the main categories of submit/export side effects.
-
-#### Scenario: Branch operations recorded
-
-- **WHEN** submit/export creates or checks out generated stack branches
-- **THEN** the receipt SHALL record branch operation entries identifying the affected branch names and commits when available
-
-#### Scenario: Push operations recorded
-
-- **WHEN** submit/export force-pushes generated stack branches
-- **THEN** the receipt SHALL record push operation entries identifying the remote and branch names
-
-#### Scenario: Pull request operations recorded
-
-- **WHEN** submit/export creates or updates a pull request
-- **THEN** the receipt SHALL record pull request operation entries identifying the commit, head branch, base branch, title, and PR URL when available
-
-#### Scenario: Metadata operations recorded
-
-- **WHEN** submit/export amends commits to add `stack-info` metadata
-- **THEN** the receipt SHALL record metadata operation entries identifying the affected head branch and commit when available
-
-#### Scenario: Cleanup warnings recorded
-
-- **WHEN** submit/export performs a best-effort cleanup operation that fails without failing the command
-- **THEN** the receipt SHALL record a warning operation entry identifying the cleanup operation and error message
-
-### Requirement: Recovery Recording
-
-Submit/export receipts SHALL record best-effort recovery attempts made after handled errors.
-
-#### Scenario: Original branch recovery recorded
-
-- **WHEN** submit/export fails and recovery attempts to checkout the original branch
-- **THEN** the receipt SHALL record a recovery operation entry with the target original branch and success or failure status
-
-#### Scenario: Stash recovery recorded
-
-- **WHEN** submit/export fails after an auto-stash was created and recovery attempts to pop the stash
-- **THEN** the receipt SHALL record a recovery operation entry with success or failure status
-
-### Requirement: Receipt Emission Failure
-
-Receipt emission failures SHALL be visible to callers.
-
-#### Scenario: Receipt file write fails
-
-- **WHEN** the effective receipt destination is a filesystem path
-- **AND** the command cannot write the receipt JSON document to that path
-- **THEN** the command SHALL return a non-zero error explaining that receipt emission failed
-
-#### Scenario: Receipt disabled suppresses receipt write failures
-
-- **WHEN** the effective receipt destination is `off`
-- **THEN** the command SHALL NOT attempt to write a receipt
-
-### Requirement: Native Stack Receipt Operations
-
-Submit/export operation receipts SHALL record the outcome of native Stack planning and reconciliation when native integration is enabled.
-
-#### Scenario: Native Stack created
-
-- **GIVEN** receipt emission is enabled
-- **WHEN** submit/export creates a GitHub native Stack
-- **THEN** the receipt SHALL include an `ok` operation containing the action `create`, Stack number, and ordered PR numbers
-
-#### Scenario: Native Stack appended
-
-- **GIVEN** receipt emission is enabled
-- **WHEN** submit/export appends PRs to a GitHub native Stack
-- **THEN** the receipt SHALL include an `ok` operation containing the action `append`, Stack number, and appended PR numbers
-
-#### Scenario: Native Stack already exact
-
-- **GIVEN** receipt emission is enabled
-- **WHEN** native reconciliation is a no-op
-- **THEN** the receipt SHALL include an `ok` operation containing the action `noop` and Stack number
-
-#### Scenario: Auto fallback recorded
-
-- **GIVEN** receipt emission is enabled
-- **AND** auto mode falls back because native Stacks is unavailable or the stack is ineligible
-- **WHEN** submit/export completes through the legacy path
-- **THEN** the receipt SHALL record the fallback reason
-
-#### Scenario: Native reconciliation failure recorded
-
-- **GIVEN** receipt emission is enabled
-- **WHEN** native classification or mutation fails after earlier submit operations succeeded
-- **THEN** the receipt SHALL include a failed native Stack operation
-- **AND** the top-level receipt status SHALL be `partial_failure`
+- Auto mode falls back because native Stacks is unavailable or the stack is ineligible and submit/export completes through the legacy path → record the fallback reason.
+- Native classification or mutation fails after earlier submit operations succeeded → include a failed native Stack operation, and the top-level receipt status is `partial_failure`.

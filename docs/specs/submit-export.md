@@ -1,673 +1,214 @@
-# Submit/Export Algorithm
+---
+title: Submit/Export
+status: stable
+---
 
-## Purpose
+# Submit/Export
+
+## Overview
 
 Define the canonical behavior of `stack-pr submit` and its `stack-pr export` alias for creating or updating a stack of GitHub pull requests from an ordered set of local commits.
 
 Submit/export mutates local Git state (branch creation, rebasing, commit amending, stashing), pushes generated branches to the remote, creates or updates GitHub PRs, adds `stack-info` metadata to commit messages, and manages cross-links between PRs. Dry-run mode previews these actions without mutation. Operation receipts provide opt-in machine-readable records of completed side effects.
-## Requirements
-### Requirement: Pre-flight Checks
 
-Before any mutation, submit/export SHALL validate repository prerequisites.
+## Behavior
 
-#### Scenario: Rebase in progress blocks submit
+### Pre-flight checks
 
-- **WHEN** a rebase is detected as in-progress (`.git/rebase-merge` or `.git/rebase-apply` exists)
-- **THEN** the command SHALL print an error and exit with status 1
-- **AND** no mutation SHALL occur
+Before any mutation, submit/export validates repository prerequisites.
 
-#### Scenario: Current branch is recorded
+- A rebase is detected as in-progress (`.git/rebase-merge` or `.git/rebase-apply` exists) → print an error, exit with status 1, and perform no mutation.
+- Submit/export begins → record the current branch name for later restoration.
+- Local base is an ancestor of `REMOTE/TARGET` and `REMOTE/TARGET` is an ancestor of `HEAD` and the base hash differs from `REMOTE/TARGET` → run `git rebase REMOTE/TARGET base`, then check out the original branch afterward.
 
-- **WHEN** submit/export begins
-- **THEN** the current branch name SHALL be recorded for later restoration
+### Stack discovery and validation
 
-#### Scenario: Optional base fast-forward
+- The stack is loaded from commits in `base..head`, ordered oldest-to-newest internally.
+- Discovered stack contains no commits → print `Empty stack!` and return without further action.
+- `--draft-bitmask` is provided → its length must match the stack length and each character must be `0` or `1`; on mismatch, print a validation message and return without submitting.
+- `--draft` is set together with a draft bitmask → `--draft` overrides the bitmask for all created PRs.
 
-- **WHEN** the local base is an ancestor of `REMOTE/TARGET`
-- **AND** `REMOTE/TARGET` is an ancestor of `HEAD`
-- **AND** the base hash differs from `REMOTE/TARGET`
-- **THEN** the command SHALL run `git rebase REMOTE/TARGET base`
-- **AND** the command SHALL checkout the original branch afterward
+### Local branch initialization
 
-### Requirement: Stack Discovery and Validation
+Submit/export creates or ensures local generated branches for each stack entry before remote interaction, without requiring a worktree checkout for every entry.
 
-Submit/export SHALL discover the commit stack, validate it, and reject empty stacks.
+- Local branches are initialized → the remote is fetched and pruned.
+- Entry is missing a metadata head → receive a generated head branch from the branch-name template.
+- Each entry → ensure the local branch `<entry.head>` points at `<commit-id>`; initialization never requires checking out each stack entry.
+- Entry already has a head branch in its metadata → reuse that head branch, and reset the corresponding local branch to the entry commit before the first batch force-push.
+- Initialization preserves the current worktree branch unless a later submit/export step explicitly checks out or rebases a branch for metadata amendment, restoration, or cleanup.
+- A generated head branch is the currently checked-out branch and already points at the corresponding stack commit → treat that branch as already initialized instead of force-updating it.
+- A generated head branch is the currently checked-out branch and does not point at the corresponding stack commit → fail with an actionable error asking the user to switch to a non-generated branch before retrying.
 
-#### Scenario: Stack loaded from base..head
+### Base branch computation
 
-- **WHEN** submit/export runs
-- **THEN** the stack SHALL be loaded from commits in `base..head`
-- **AND** stack entries SHALL be ordered oldest-to-newest internally
+- First (bottom) entry of a non-empty stack → base is the remote target branch (normally `main`).
+- Each subsequent entry → base is the previous entry's head branch.
+- Base branches are computed → determine whether the original current branch needs rebasing; true if the top stack branch is an ancestor of the current branch.
 
-#### Scenario: Empty stack rejected
+### Experimental submit engine gate
 
-- **WHEN** the discovered stack contains no commits
-- **THEN** the command SHALL print `Empty stack!` and return without further action
+Submit/export uses the current submit/export algorithm by default; the optimized submit/export engine is used only when an experimental feature gate opts in.
 
-#### Scenario: Draft bitmask validation
+- `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE` is not set to `1` and `.stack-pr.cfg` does not set `submit.experimental_engine = true` → use the current submit/export implementation path; the optimized no-op skip behavior introduced by this change is not required on that invocation.
+- `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1` → use the optimized submit/export engine, which preserves the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm.
+- `.stack-pr.cfg` sets `submit.experimental_engine = true` → use the optimized submit/export engine, which preserves the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm.
+- `submit --dry-run` or `export --dry-run` → dry-run planning uses the same submit/export engine selection rule as the corresponding non-dry-run command, and dry-run remains free of local Git mutations, remote pushes, and GitHub PR writes.
 
-- **WHEN** `--draft-bitmask` is provided
-- **THEN** its length SHALL match the stack length
-- **AND** each character SHALL be `0` or `1`
-- **AND** on mismatch, the command SHALL print a validation message and return without submitting
+### Existing PR safeguard
 
-- **WHEN** `--draft` is set together with a draft bitmask
-- **THEN** `--draft` SHALL override the bitmask for all created PRs
+When the experimental submit/export engine is enabled, submit/export temporarily protects existing PRs from spurious merge notifications while avoiding redundant GitHub mutations before creating new PRs.
 
-### Requirement: Local Branch Initialization
+- Entry has an existing PR → determine the PR `isDraft` status via GitHub state available to submit/export; if the PR is not draft, mark it draft with `gh pr ready <pr> --undo` and record `is_tmp_draft=True` for later restoration.
+- Existing PR is already draft → do not call `gh pr ready <pr> --undo` for that PR, and do not record the PR for ready-state restoration solely because it was already draft.
+- Entry has an existing PR → ensure its base branch is the target before stack branches are repushed; if the PR base branch already equals the target, do not call `gh pr edit <pr> -B <target>` for that temporary reset (prevents spurious merge notifications while avoiding no-op base edits).
+- Existing PR base branch differs from the target → set its base branch to the target using `gh pr edit <pr> -B <target>`.
 
-Submit/export SHALL create or ensure local generated branches for each stack entry before remote interaction without requiring a worktree checkout for every entry.
+### Force-push stack branches
 
-#### Scenario: Generated branch assignment
+- Local branches are initialized and existing PRs are safeguarded → force-push all stack head branches in one command: `git push -f <remote> <head1>:<head1> <head2>:<head2> ...`
 
-- **WHEN** local branches are initialized
-- **THEN** the remote SHALL be fetched and pruned
-- **AND** entries missing metadata heads SHALL receive generated head branches from the branch-name template
-- **AND** for each entry, the command SHALL ensure the local branch `<entry.head>` points at `<commit-id>`
-- **AND** this initialization SHALL NOT require checking out each stack entry
+### PR creation for new entries
 
-#### Scenario: Existing metadata head preserved
+- Stack entry lacks PR metadata → create a PR with `gh pr create -B <base> -H <head> -t <commit-title> -F - [--reviewer <reviewer>] [--draft]`; the body input is the full commit message; the PR reference is parsed as the last whitespace-separated token of command output.
+- New PR is created and `--draft` is set → create the PR as draft.
+- New PR is created and a draft bitmask is provided → create the PR as draft if the corresponding bitmask character is `1`.
 
-- **WHEN** a stack entry already has a head branch in its metadata
-- **THEN** that head branch SHALL be reused
-- **AND** the corresponding local branch SHALL be reset to the entry commit before the first batch force-push
+### Stack verification
 
-#### Scenario: Current branch preserved during initialization
+- PR creation completes → run stack verification against GitHub; each entry's PR, head, and base must be present and match GitHub state.
 
-- **WHEN** local generated branches are initialized
-- **THEN** the command SHALL preserve the current worktree branch unless a later submit/export step explicitly checks out or rebases a branch for metadata amendment, restoration, or cleanup
+### Metadata addition
 
-#### Scenario: Current generated branch already initialized
+Submit/export amends commits to embed `stack-info` metadata so subsequent commands can reconstruct the stack.
 
-- **WHEN** local generated branches are initialized
-- **AND** one generated head branch is the currently checked-out branch
-- **AND** that branch already points at the corresponding stack commit
-- **THEN** the command SHALL treat that branch as already initialized instead of force-updating it
+- Metadata is added and no rebase is needed for the current branch → check out the first changed commit's head branch, append the `stack-info: PR: <pr-url>, branch: <head>` line to its commit message (separated from the commit title/body by at least one blank line), and amend with `git commit --amend -F -`.
+- Metadata is added for a later stack entry and a prior commit was amended → rebase the entry's branch onto its base using `git rebase <base> <head> --committer-date-is-author-date`, then append the `stack-info` line and amend.
+- One commit has been amended → all subsequent entries require rebasing before amendment.
 
-#### Scenario: Current generated branch would need moving
+### Final push and cross-linking
 
-- **WHEN** local generated branches are initialized
-- **AND** one generated head branch is the currently checked-out branch
-- **AND** that branch does not point at the corresponding stack commit
-- **THEN** the command SHALL fail with an actionable error asking the user to switch to a non-generated branch before retrying
+When the experimental submit/export engine is enabled, submit/export publishes changed branch tips and updates PR descriptions with cross-links while avoiding no-op pushes and PR edits after metadata is embedded.
 
-### Requirement: Base Branch Computation
+- Metadata amendment or metadata-driven rebasing changes one or more stack head branch tips → force-push all stack head branches again to the remote.
+- No commit metadata was amended and no metadata-driven rebasing changed stack head branch tips → do not perform the second batch force-push.
+- Stack has more than one PR → each PR body receives a stacked-PRs table of contents newest-to-oldest, with the current PR marked with `__->__`, followed by the delimiter `--- --- ---`.
+- Stack contains exactly one PR → no table of contents is generated.
+- PR body is constructed → the PR title is the commit title; the first line (title) is stripped from the commit message body; the `stack-info` metadata line is stripped; for multi-PR stacks, the body content starts with `### <title>` followed by the stripped commit body.
+- `--keep-body` is set → fetch or reuse the existing PR body from GitHub state available to submit/export, and preserve content after the delimiter `--- --- ---` instead of regenerating the body.
+- Desired PR title, body, or base branch differs from the current GitHub PR state → update the PR with `gh pr edit <pr> -t <title> -F - -B <base>`.
+- Desired PR title, body, and base branch already match the current GitHub PR state → do not call `gh pr edit` for that PR.
 
-Submit/export SHALL compute base branches for every stack entry so each PR targets the correct branch.
+### Cleanup and restoration
 
-#### Scenario: Bottom entry targets remote target
+- Existing PRs were marked temporary draft during submission → after cross-linking completes, restore those PRs to ready state with `gh pr ready <pr>`.
+- Current branch needs rebasing → rebase it onto the top stack branch with `git rebase <top_branch> <current_branch> --committer-date-is-author-date`; otherwise check out the original branch directly.
+- Cleanup completes → delete all local generated branches with `git branch -D ...`, ignoring deletion errors (check=False).
+- Post-export tips are enabled → print guidance for the user after submission.
 
-- **WHEN** base branches are computed for a non-empty stack
-- **THEN** the first (bottom) entry's base SHALL be the remote target branch (normally `main`)
+### Automatic stash lifecycle recovery
 
-#### Scenario: Higher entries target previous head
+When non-dry-run submit/export creates an automatic stash, it attempts to restore that stash before returning from every subsequent success or failure path. This implements the Python-compatible `finally` semantics documented in `SPEC.md` section 8.
 
-- **WHEN** base branches are computed
-- **THEN** each subsequent entry's base SHALL be the previous entry's head branch
-
-#### Scenario: Current branch rebase detection
-
-- **WHEN** base branches are computed
-- **THEN** the command SHALL determine whether the original current branch needs rebasing
-- **AND** this SHALL be true if the top stack branch is an ancestor of the current branch
-
-### Requirement: Experimental Submit Engine Gate
-
-Submit/export SHALL use the current submit/export algorithm by default and SHALL use the optimized submit/export engine only when an experimental feature gate opts in.
-
-#### Scenario: Default submit/export path remains legacy
-
-- **WHEN** `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE` is not set to `1`
-- **AND** `.stack-pr.cfg` does not set `submit.experimental_engine = true`
-- **AND** a user runs `submit` or the `export` alias
-- **THEN** the command SHALL use the current submit/export implementation path
-- **AND** the optimized no-op skip behavior introduced by this change SHALL NOT be required on that invocation
-
-#### Scenario: Experimental submit/export engine enabled by env flag
-
-- **WHEN** `STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE=1`
-- **AND** a user runs `submit` or the `export` alias
-- **THEN** the command SHALL use the optimized submit/export engine
-- **AND** the optimized engine SHALL preserve the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm
-
-#### Scenario: Experimental submit/export engine enabled by config
-
-- **WHEN** `.stack-pr.cfg` sets `submit.experimental_engine = true`
-- **AND** a user runs `submit` or the `export` alias
-- **THEN** the command SHALL use the optimized submit/export engine
-- **AND** the optimized engine SHALL preserve the same final local Git, remote branch, and GitHub PR state as the current submit/export algorithm
-
-#### Scenario: Dry-run uses the selected engine
-
-- **WHEN** a user runs `submit --dry-run` or `export --dry-run`
-- **THEN** dry-run planning SHALL use the same submit/export engine selection rule as the corresponding non-dry-run command
-- **AND** dry-run SHALL remain free of local Git mutations, remote pushes, and GitHub PR writes
-
-### Requirement: Existing PR Safeguard
-
-When the experimental submit/export engine is enabled, submit/export SHALL temporarily protect existing PRs from spurious merge notifications while avoiding redundant GitHub mutations before creating new PRs.
-
-#### Scenario: Existing PRs marked temporary draft only when needed
-
-- **WHEN** an entry has an existing PR
-- **THEN** the command SHALL determine the PR `isDraft` status via GitHub state available to submit/export
-- **AND** if the PR is not draft
-- **THEN** the command SHALL mark it draft with `gh pr ready <pr> --undo`
-- **AND** record `is_tmp_draft=True` for later restoration
-
-#### Scenario: Existing draft PRs do not need temporary draft mutation
-
-- **WHEN** an entry has an existing PR
-- **AND** the PR is already draft
-- **THEN** the command SHALL NOT call `gh pr ready <pr> --undo` for that PR
-- **AND** the PR SHALL NOT be recorded for ready-state restoration solely because it was already draft
-
-#### Scenario: Existing PR base reset to target only when needed
-
-- **WHEN** an entry has an existing PR
-- **THEN** the command SHALL ensure its base branch is the target before stack branches are repushed
-- **AND** if the PR base branch already equals the target
-- **THEN** the command SHALL NOT call `gh pr edit <pr> -B <target>` for that temporary reset
-- **AND** this prevents spurious merge notifications while avoiding no-op base edits
-
-#### Scenario: Existing PR base changed to target when needed
-
-- **WHEN** an entry has an existing PR
-- **AND** the PR base branch differs from the target
-- **THEN** the command SHALL set its base branch to the target using `gh pr edit <pr> -B <target>`
-
-### Requirement: Force-push Stack Branches
-
-Submit/export SHALL push all generated head branches to the remote in a single batch.
-
-#### Scenario: Single batch force-push
-
-- **WHEN** local branches are initialized and existing PRs are safeguarded
-- **THEN** the command SHALL force-push all stack head branches in one command:
-  - `git push -f <remote> <head1>:<head1> <head2>:<head2> ...`
-
-### Requirement: PR Creation for New Entries
-
-Submit/export SHALL create a GitHub pull request for every stack entry that does not already have one.
-
-#### Scenario: New PR creation
-
-- **WHEN** a stack entry lacks PR metadata
-- **THEN** the command SHALL create a PR with:
-  - `gh pr create -B <base> -H <head> -t <commit-title> -F - [--reviewer <reviewer>] [--draft]`
-- **AND** the body input SHALL be the full commit message
-- **AND** the PR reference SHALL be parsed as the last whitespace-separated token of command output
-
-#### Scenario: Draft from draft flag or bitmask
-
-- **WHEN** a new PR is created and `--draft` is set
-- **THEN** the PR SHALL be created as draft
-
-- **WHEN** a new PR is created and a draft bitmask is provided
-- **THEN** the PR SHALL be created as draft if the corresponding bitmask character is `1`
-
-### Requirement: Stack Verification
-
-After initial PR creation, submit/export SHALL verify that stack metadata and GitHub state are consistent.
-
-#### Scenario: Verify after creation
-
-- **WHEN** PR creation completes
-- **THEN** the command SHALL run stack verification against GitHub
-- **AND** each entry's PR, head, and base SHALL be present and match GitHub state
-
-### Requirement: Metadata Addition
-
-Submit/export SHALL amend commits to embed `stack-info` metadata so subsequent commands can reconstruct the stack.
-
-#### Scenario: First commit amended without rebase
-
-- **WHEN** metadata is added and no rebase is needed for the current branch
-- **THEN** the first changed commit's head branch SHALL be checked out
-- **AND** the `stack-info: PR: <pr-url>, branch: <head>` line SHALL be appended to its commit message
-- **AND** the metadata line SHALL be separated from the commit title/body by at least one blank line
-- **AND** the commit SHALL be amended with `git commit --amend -F -`
-
-#### Scenario: Subsequent commits rebased and amended
-
-- **WHEN** metadata is added for a later stack entry
-- **THEN** if a prior commit was amended
-- **AND** the entry's branch SHALL be rebased onto its base using `git rebase <base> <head> --committer-date-is-author-date`
-- **AND** then the `stack-info` line SHALL be appended and amended
-
-#### Scenario: Rebase cascades after first amendment
-
-- **WHEN** one commit has been amended
-- **THEN** all subsequent entries SHALL require rebasing before amendment
-
-### Requirement: Final Push and Cross-linking
-
-When the experimental submit/export engine is enabled, submit/export SHALL publish changed branch tips and update PR descriptions with cross-links while avoiding no-op pushes and PR edits after metadata is embedded.
-
-#### Scenario: Second force-push after metadata changes
-
-- **WHEN** metadata amendment or metadata-driven rebasing changes one or more stack head branch tips
-- **THEN** all stack head branches SHALL be force-pushed again to the remote
-
-#### Scenario: Second force-push skipped when metadata is unchanged
-
-- **WHEN** no commit metadata was amended
-- **AND** no metadata-driven rebasing changed stack head branch tips
-- **THEN** submit/export SHALL NOT perform the second batch force-push
-
-#### Scenario: Cross-links added for multi-PR stacks
-
-- **WHEN** the stack has more than one PR
-- **THEN** each PR body SHALL receive a stacked-PRs table of contents newest-to-oldest
-- **AND** the current PR SHALL be marked with `__->__`
-- **AND** the TOC SHALL be followed by the delimiter `--- --- ---`
-
-#### Scenario: No cross-links for single-PR stack
-
-- **WHEN** the stack contains exactly one PR
-- **THEN** no table of contents SHALL be generated
-
-#### Scenario: PR body construction
-
-- **WHEN** a PR body is constructed
-- **THEN** the PR title SHALL be the commit title
-- **AND** the first line (title) SHALL be stripped from the commit message body
-- **AND** the `stack-info` metadata line SHALL be stripped
-- **AND** for multi-PR stacks, the body content SHALL start with `### <title>` followed by the stripped commit body
-
-#### Scenario: Keep-body preserves existing content
-
-- **WHEN** `--keep-body` is set
-- **THEN** the existing PR body SHALL be fetched or reused from GitHub state available to submit/export
-- **AND** content after the delimiter `--- --- ---` SHALL be preserved instead of regenerating the body
-
-#### Scenario: PR title, body, and base updated when changed
-
-- **WHEN** cross-links are added
-- **AND** the desired PR title, body, or base branch differs from the current GitHub PR state
-- **THEN** the PR SHALL be updated with:
-  - `gh pr edit <pr> -t <title> -F - -B <base>`
-
-#### Scenario: PR edit skipped when title, body, and base already match
-
-- **WHEN** cross-links are added
-- **AND** the desired PR title, body, and base branch already match the current GitHub PR state
-- **THEN** submit/export SHALL NOT call `gh pr edit` for that PR
-
-### Requirement: Cleanup and Restoration
-
-Submit/export SHALL restore repository state after mutations.
-
-#### Scenario: Temporary draft restored
-
-- **WHEN** existing PRs were marked temporary draft during submission
-- **THEN** after cross-linking completes
-- **AND** those PRs SHALL be restored to ready state with `gh pr ready <pr>`
-
-#### Scenario: Original branch restored
-
-- **WHEN** cleanup begins
-- **AND** if the current branch needs rebasing
-- **THEN** it SHALL be rebased onto the top stack branch with `git rebase <top_branch> <current_branch> --committer-date-is-author-date`
-- **AND** otherwise the original branch SHALL be checked out directly
-
-#### Scenario: Local generated branches deleted
-
-- **WHEN** cleanup completes
-- **THEN** all local generated branches SHALL be deleted with `git branch -D ...`
-- **AND** deletion errors SHALL be ignored (check=False)
-
-#### Scenario: Post-export tips printed
-
-- **WHEN** post-export tips are enabled
-- **THEN** the command SHALL print guidance for the user after submission
-
-### Requirement: Automatic stash lifecycle recovery
-
-When non-dry-run submit/export creates an automatic stash, the command SHALL
-attempt to restore that stash before returning from every subsequent success or
-failure path. This requirement implements the Python-compatible `finally`
-semantics documented in `SPEC.md` section 8.
-
-#### Scenario: Clean validation fails after stashing
-
-- **GIVEN** submit/export created an automatic stash
-- **WHEN** the post-stash clean working-tree validation fails
-- **THEN** the command SHALL attempt to restore the automatic stash before returning the validation error
-
-#### Scenario: Target validation fails after stashing
-
-- **GIVEN** submit/export created an automatic stash
-- **WHEN** remote target validation fails before command dispatch
-- **THEN** the command SHALL attempt to restore the automatic stash before returning the target error
-
-#### Scenario: Merge-base deduction fails after stashing
-
-- **GIVEN** submit/export created an automatic stash
-- **WHEN** merge-base deduction fails before command dispatch
-- **THEN** the command SHALL attempt to restore the automatic stash before returning the merge-base error
-
-#### Scenario: Command execution succeeds
-
-- **GIVEN** submit/export created an automatic stash and pre-run initialization succeeded
-- **WHEN** command execution returns successfully
-- **THEN** the command SHALL restore the automatic stash before the invocation returns
-
-#### Scenario: Command execution fails
-
-- **GIVEN** submit/export created an automatic stash and pre-run initialization succeeded
-- **WHEN** command execution returns an error or panics
-- **THEN** recovery SHALL attempt to restore the automatic stash before the invocation returns
-
-#### Scenario: Pre-run restoration fails
-
-- **GIVEN** post-stash pre-run initialization fails
-- **WHEN** restoring the automatic stash also fails
-- **THEN** the returned error SHALL preserve both the initialization failure and the restoration failure
-
-#### Scenario: No automatic stash was created
-
-- **GIVEN** the working tree was clean or dry-run prevented automatic stashing
-- **WHEN** initialization or command execution returns
-- **THEN** the command SHALL NOT attempt to pop a stash
-
-### Requirement: Exact automatic stash identity
-
-Non-dry-run submit/export SHALL determine automatic stash creation from Git
-reference state rather than human-facing command output, SHALL retain the exact
-created stash identity, and SHALL restore and remove only that stash. This is an
-explicit Go-port safety improvement over Python `stack-pr`'s boolean and top-pop
-behavior documented in `SPEC.md` section 8.
-
-#### Scenario: Clean working tree
-
-- **GIVEN** no tracked working-tree changes exist
-- **WHEN** automatic stash creation runs
-- **THEN** the command SHALL record no automatic stash regardless of Git's human-facing output
-- **AND** recovery SHALL NOT apply or drop any existing user stash
-
-#### Scenario: Localized or unexpected stash output
-
-- **GIVEN** `git stash push` emits localized, empty, or unexpected human-facing output
-- **WHEN** Git changes `refs/stash` to a new stash commit
-- **THEN** the command SHALL record the new commit as the automatic stash
-
-#### Scenario: Pre-existing user stash
-
-- **GIVEN** a user stash exists before automatic stash creation
-- **WHEN** the automatic stash is successfully restored
-- **THEN** the pre-existing user stash SHALL remain unchanged
-
-#### Scenario: Newer user stash
-
-- **GIVEN** another stash entry is added above the recorded automatic stash before recovery
-- **WHEN** automatic stash restoration runs
-- **THEN** the command SHALL apply and remove the recorded automatic stash
-- **AND** the newer user stash SHALL remain unchanged
-
-#### Scenario: Successful exact restoration
-
-- **GIVEN** a recorded automatic stash exists and applies cleanly
-- **WHEN** recovery runs
-- **THEN** the exact automatic stash changes SHALL be restored to the working tree
-- **AND** only its matching stash reflog entry SHALL be removed
-- **AND** invocation state SHALL no longer record an automatic stash
-
-#### Scenario: Restoration conflict
-
-- **GIVEN** the recorded automatic stash conflicts with current working-tree state
-- **WHEN** recovery attempts to apply it
-- **THEN** recovery SHALL return an actionable error identifying the automatic stash
-- **AND** the automatic stash entry SHALL remain available for manual recovery
-- **AND** invocation state SHALL retain the automatic stash identity
-
-#### Scenario: Automatic stash entry is missing
-
-- **GIVEN** invocation state records an automatic stash whose reflog entry no longer exists
-- **WHEN** recovery runs
-- **THEN** recovery SHALL return an actionable error
-- **AND** it SHALL NOT apply or remove a different stash entry
-
-### Requirement: Native Stack Submit Reconciliation
-
-When native integration is enabled, submit/export SHALL reconcile the final submitted PR chain with GitHub after ordinary PR and branch publication succeeds.
-
-#### Scenario: Reconciliation occurs after final PR state
-
-- **GIVEN** native integration is enabled for an eligible stack
-- **WHEN** submit/export has completed final branch pushes, commit metadata amendment, PR title/body/base updates, and temporary draft restoration
-- **THEN** the command SHALL reload and validate candidate PR state and native membership
-- **AND** it SHALL apply only a `create`, `append`, or `noop` result
-
-#### Scenario: Both submit engines reconcile identically
-
-- **GIVEN** native integration is enabled
-- **WHEN** either the current submit engine or the optimized submit engine reaches its final remote phase
-- **THEN** both engines SHALL use the same native reconciliation rules
-- **AND** they SHALL produce the same final GitHub Stack membership
-
-#### Scenario: New native Stack created
-
-- **GIVEN** the final eligible PR chain is entirely unstacked
-- **WHEN** submit/export reconciles native membership
-- **THEN** it SHALL POST every existing PR number bottom-to-top to `repos/{owner}/{repo}/stacks`
-- **AND** it SHALL require a `201` Stack response with the exact resulting complete sequence
-
-#### Scenario: Existing native Stack extended
-
-- **GIVEN** the remote native sequence is an exact prefix of the final local PR sequence
-- **AND** the local suffix PRs are unstacked
-- **WHEN** submit/export reconciles native membership
-- **THEN** it SHALL POST only the suffix PR numbers to `repos/{owner}/{repo}/stacks/{stack_number}/add`
-- **AND** it SHALL require a `200` Stack response with the exact resulting complete sequence
-
-#### Scenario: Exact native Stack skips write
-
-- **GIVEN** native membership exactly matches the final local PR sequence
-- **WHEN** submit/export reconciles native membership
-- **THEN** no native Stack write SHALL occur
-
-#### Scenario: Native conflict fails after existing submit effects
-
-- **GIVEN** ordinary submit/export effects have completed
-- **AND** native membership is conflicting
-- **WHEN** reconciliation runs
-- **THEN** the command SHALL return an error without changing native membership
-- **AND** the error SHALL state that earlier PR or branch updates may already have completed
-
-#### Scenario: Uncertain create or append is reconciled
-
-- **GIVEN** a native create or append request fails with an uncertain server outcome
-- **WHEN** submit/export handles the failure
-- **THEN** it SHALL read current native membership and the complete affected Stack
-- **AND** it SHALL accept an exact intended sequence as success
-- **AND** it SHALL report unchanged, divergent, or unverified state without blindly repeating the write
-
-#### Scenario: Cross-links retained in native mode
-
-- **GIVEN** a multi-PR stack is published as a GitHub native Stack
-- **WHEN** PR bodies are finalized
-- **THEN** the existing stacked-PR table of contents and delimiter SHALL remain present
-
-### Requirement: Native Stack Push Lease Safety
-
-When native mode is active, submit/export SHALL avoid overwriting server-side Stack rebases or concurrent remote updates with an unconditional force push.
-
-#### Scenario: Existing native branch uses observed lease
-
-- **GIVEN** native mode is active
-- **AND** a generated remote branch existed when submit preflight read its head OID
-- **WHEN** submit/export force-updates that branch
-- **THEN** the push SHALL require the remote branch still to equal the observed OID
-
-#### Scenario: Lease mismatch stops submit
-
-- **GIVEN** GitHub or another actor updates a generated remote branch after preflight
-- **WHEN** submit/export pushes with its observed lease
-- **THEN** the push SHALL fail without overwriting the newer remote head
-- **AND** native reconciliation SHALL NOT run
-
-#### Scenario: Newly created branch has absence expectation
-
-- **GIVEN** native mode is active
-- **AND** a generated remote branch did not exist at preflight
-- **WHEN** submit/export first pushes that branch
-- **THEN** the push SHALL require that the branch is still absent
-
-### Requirement: Native Stack Availability Preflight
-
-Required native integration SHALL fail before submit-specific mutation when repository support is unavailable, and native writes SHALL use the documented REST endpoints through the base GitHub CLI.
-
-#### Scenario: Required mode unavailable before submit mutation
-
-- **GIVEN** `github.native_stacks = required`
-- **AND** GitHub native Stacks is unavailable for the repository
-- **WHEN** submit/export begins
-- **THEN** it SHALL fail before generated branch creation, commit amendment, remote push, PR mutation, or native Stack mutation
-
-#### Scenario: Auto mode unavailable continues legacy submit
-
-- **GIVEN** `github.native_stacks = auto`
-- **AND** GitHub native Stacks is unavailable for the repository
-- **WHEN** submit/export begins
-- **THEN** it SHALL warn once
-- **AND** it SHALL execute the legacy submit/export algorithm without native reconciliation
-
-#### Scenario: Native writer requires no extension
-
-- **GIVEN** GitHub native Stacks is available
-- **AND** the final PR chain is eligible for create or append
-- **WHEN** submit/export performs native preflight
-- **THEN** it SHALL proceed using `gh api`
-- **AND** it SHALL NOT inspect, require, install, or upgrade the `github/gh-stack` extension
-
-### Requirement: Dry Run Behavior
-
-Submit/export dry-run mode SHALL preview actions without any mutation.
-
-#### Scenario: Dry-run flag accepted
-
-- **WHEN** `stack-pr submit --dry-run` or `stack-pr export --dry-run` is invoked with otherwise valid options
-- **THEN** the command SHALL execute dry-run behavior instead of real submit/export behavior
-
-#### Scenario: Dry-run prints plan
-
-- **WHEN** dry-run mode is invoked for a non-empty stack
-- **THEN** output SHALL include each stack entry in stack order showing commit title, generated head branch, computed base branch, and whether the PR would be created or updated
-- **AND** entries for new PRs SHALL show the draft state that would be used
-- **AND** entries requiring metadata SHALL indicate metadata would be added
-
-#### Scenario: Dry-run empty stack
-
-- **WHEN** dry-run mode is invoked for an empty stack
-- **THEN** output SHALL report that the stack is empty
-
-#### Scenario: Dry-run no-changes note
-
-- **WHEN** dry-run mode completes successfully
-- **THEN** output SHALL clearly state that no local Git changes, remote pushes, or GitHub PR changes were made
-
-#### Scenario: Dry-run mutation safety
-
-- **WHEN** dry-run mode is invoked
-- **THEN** the command SHALL NOT checkout generated branches, rebase, amend commits, create or delete local branches, save or pop a stash
-- **AND** the command SHALL NOT push branches to the remote
-- **AND** the command SHALL NOT create or edit PRs or change draft state
-
-#### Scenario: Dry-run validation
-
-- **WHEN** dry-run mode is invoked
-- **THEN** it SHALL validate the draft bitmask and compute head/base branches using the same rules as real submit/export
-- **AND** it SHALL fail the clean-repository check if tracked files have changes
-- **AND** it SHALL NOT auto-stash changes
-
-#### Scenario: Non-dry-run behavior preserved
-
-- **WHEN** `stack-pr submit` or `stack-pr export` is invoked without `--dry-run`
-- **THEN** the command SHALL perform full submit/export mutations as specified
-
-### Requirement: Operation Receipts
-
-Submit/export SHALL support opt-in machine-readable receipts for real executions.
-
-#### Scenario: Receipt flag accepted on submit and export
-
-- **WHEN** `stack-pr submit --receipt <destination>` or `stack-pr export --receipt <destination>` is invoked without `--dry-run`
-- **THEN** the command SHALL attempt to emit a submit operation receipt
-
-#### Scenario: Receipt disabled by default
-
-- **WHEN** submit/export is invoked without a receipt flag and without receipt configuration
-- **THEN** the command SHALL NOT emit a receipt
-- **AND** existing human output SHALL remain unchanged
-
-#### Scenario: Receipt destination values
-
-- **WHEN** a receipt destination is provided
-- **THEN** `off` SHALL disable receipt emission
-- **AND** `-` SHALL emit one JSON document on standard output
-- **AND** any other value SHALL be interpreted as a filesystem path
-
-#### Scenario: Dry-run receipt rejected
-
-- **WHEN** `--dry-run` and `--receipt <destination>` (other than `off`) are both provided
-- **THEN** the command SHALL report an invocation error explaining receipts are only available for real executions
-- **AND** the command SHALL NOT perform mutations
-
-#### Scenario: Receipt configuration in .stack-pr.cfg
-
-- **WHEN** `.stack-pr.cfg` contains `receipt.submit = <destination>`
-- **THEN** submit/export SHALL use that destination unless `--receipt` overrides it
-- **AND** the default when omitted SHALL be `off`
-
-#### Scenario: Receipt JSON envelope
-
-- **WHEN** a receipt is emitted
-- **THEN** it SHALL be a single JSON object with fields:
-  - `schema_version` (non-empty string)
-  - `command` (`stack-pr submit` or `stack-pr export`)
-  - `status` (`ok`, `failed`, or `partial_failure`)
-  - `side_effects` (`true`)
-  - `repo` (repository root, original branch, remote, target, base, head, template when available)
-  - `stack` (size, per-entry commit SHA, title, head branch, base branch, PR URL when known)
-  - `operations` (array of operation entries)
-
-#### Scenario: Receipt operation entries
-
-- **WHEN** a side-effecting operation completes successfully
-- **THEN** the receipt SHALL append an entry with `type`, `status: ok`, and operation-specific details
-
-#### Scenario: Receipt failure recording
-
-- **WHEN** a side-effecting operation fails after receipt collection begins
-- **THEN** the receipt SHALL append or update an entry with `status: failed` and an error message
-
-#### Scenario: Receipt partial failure status
-
-- **WHEN** at least one operation succeeds followed by a failed operation
-- **THEN** the top-level `status` SHALL be `partial_failure`
-
-#### Scenario: Receipt successful status
-
-- **WHEN** submit/export completes successfully
-- **THEN** the top-level `status` SHALL be `ok`
-
-#### Scenario: Receipt operation coverage
-
-- **WHEN** branch, push, PR, metadata, or cleanup operations occur
-- **THEN** the receipt SHALL record entries identifying the affected branches, remotes, PRs, commits, or error messages
-
-#### Scenario: Receipt recovery recording
-
-- **WHEN** submit/export fails and recovery attempts original-branch checkout or stash pop
-- **THEN** the receipt SHALL record recovery operation entries with success or failure status
-
-#### Scenario: Receipt emission failure
-
-- **WHEN** the effective receipt destination is a filesystem path and writing fails
-- **THEN** the command SHALL return a non-zero error explaining receipt emission failed
-
-#### Scenario: Disabled receipt suppresses errors
-
-- **WHEN** the effective receipt destination is `off`
-- **THEN** the command SHALL NOT attempt to write a receipt
+| Point of return | Behavior |
+|-----------------|----------|
+| Post-stash clean working-tree validation fails | attempt to restore the automatic stash before returning the validation error |
+| Remote target validation fails before command dispatch | attempt to restore the automatic stash before returning the target error |
+| Merge-base deduction fails before command dispatch | attempt to restore the automatic stash before returning the merge-base error |
+| Command execution returns successfully | restore the automatic stash before the invocation returns |
+| Command execution returns an error or panics | recovery attempts to restore the automatic stash before the invocation returns |
+| Post-stash pre-run initialization fails and restoring the automatic stash also fails | the returned error preserves both the initialization failure and the restoration failure |
+| Working tree was clean or dry-run prevented automatic stashing | do not attempt to pop a stash |
+
+### Exact automatic stash identity
+
+Non-dry-run submit/export determines automatic stash creation from Git reference state rather than human-facing command output, retains the exact created stash identity, and restores and removes only that stash. This is an explicit Go-port safety improvement over Python `stack-pr`'s boolean and top-pop behavior documented in `SPEC.md` section 8.
+
+- No tracked working-tree changes exist → record no automatic stash regardless of Git's human-facing output; recovery never applies or drops any existing user stash.
+- `git stash push` emits localized, empty, or unexpected human-facing output and Git changes `refs/stash` to a new stash commit → record the new commit as the automatic stash.
+- A user stash exists before automatic stash creation → after the automatic stash is successfully restored, the pre-existing user stash remains unchanged.
+- Another stash entry is added above the recorded automatic stash before recovery → apply and remove the recorded automatic stash; the newer user stash remains unchanged.
+- A recorded automatic stash exists and applies cleanly → restore the exact automatic stash changes to the working tree, remove only its matching stash reflog entry, and clear the automatic stash from invocation state.
+- The recorded automatic stash conflicts with current working-tree state → return an actionable error identifying the automatic stash, leave the automatic stash entry available for manual recovery, and retain the automatic stash identity in invocation state.
+- Invocation state records an automatic stash whose reflog entry no longer exists → return an actionable error; never apply or remove a different stash entry.
+
+### Native Stack reconciliation
+
+When native integration is enabled, submit/export reconciles the final submitted PR chain with GitHub after ordinary PR and branch publication succeeds.
+
+- Native integration is enabled for an eligible stack → after final branch pushes, commit metadata amendment, PR title/body/base updates, and temporary draft restoration, reload and validate candidate PR state and native membership, and apply only a `create`, `append`, or `noop` result.
+- Either the current submit engine or the optimized submit engine reaches its final remote phase → both engines use the same native reconciliation rules and produce the same final GitHub Stack membership.
+
+| Native membership state | Behavior |
+|-------------------------|----------|
+| Final eligible PR chain is entirely unstacked | POST every existing PR number bottom-to-top to `repos/{owner}/{repo}/stacks`; require a `201` Stack response with the exact resulting complete sequence |
+| Remote native sequence is an exact prefix of the final local PR sequence and the local suffix PRs are unstacked | POST only the suffix PR numbers to `repos/{owner}/{repo}/stacks/{stack_number}/add`; require a `200` Stack response with the exact resulting complete sequence |
+| Native membership exactly matches the final local PR sequence | no native Stack write occurs |
+| Ordinary submit/export effects have completed and native membership is conflicting | return an error without changing native membership; the error states that earlier PR or branch updates may already have completed |
+| A native create or append request fails with an uncertain server outcome | read current native membership and the complete affected Stack; accept an exact intended sequence as success; report unchanged, divergent, or unverified state without blindly repeating the write |
+
+- A multi-PR stack is published as a GitHub native Stack → the existing stacked-PR table of contents and delimiter remain present in the finalized PR bodies.
+
+### Native Stack push lease safety
+
+When native mode is active, submit/export avoids overwriting server-side Stack rebases or concurrent remote updates with an unconditional force push.
+
+- A generated remote branch existed when submit preflight read its head OID → the force-update push requires the remote branch still to equal the observed OID.
+- GitHub or another actor updates a generated remote branch after preflight → the push with the observed lease fails without overwriting the newer remote head, and native reconciliation does not run.
+- A generated remote branch did not exist at preflight → the first push of that branch requires that the branch is still absent.
+
+### Native Stack availability preflight
+
+Required native integration fails before submit-specific mutation when repository support is unavailable, and native writes use the documented REST endpoints through the base GitHub CLI.
+
+- `github.native_stacks = required` and GitHub native Stacks is unavailable for the repository → fail before generated branch creation, commit amendment, remote push, PR mutation, or native Stack mutation.
+- `github.native_stacks = auto` and GitHub native Stacks is unavailable for the repository → warn once and execute the legacy submit/export algorithm without native reconciliation.
+- GitHub native Stacks is available and the final PR chain is eligible for create or append → proceed using `gh api`; never inspect, require, install, or upgrade the `github/gh-stack` extension.
+
+### Dry-run behavior
+
+Dry-run mode previews actions without any mutation.
+
+- `--dry-run` is invoked with otherwise valid options → execute dry-run behavior instead of real submit/export behavior.
+- Dry-run is invoked for a non-empty stack → output includes each stack entry in stack order showing commit title, generated head branch, computed base branch, and whether the PR would be created or updated; entries for new PRs show the draft state that would be used; entries requiring metadata indicate metadata would be added.
+- Dry-run is invoked for an empty stack → output reports that the stack is empty.
+- Dry-run completes successfully → output clearly states that no local Git changes, remote pushes, or GitHub PR changes were made.
+- Dry-run never checks out generated branches, rebases, amends commits, creates or deletes local branches, or saves or pops a stash; never pushes branches to the remote; never creates or edits PRs or changes draft state.
+- Dry-run validates the draft bitmask and computes head/base branches using the same rules as real submit/export; it fails the clean-repository check if tracked files have changes and does not auto-stash changes.
+- Invoked without `--dry-run` → perform full submit/export mutations as specified.
+
+### Operation receipts
+
+Submit/export supports opt-in machine-readable receipts for real executions.
+
+- `--receipt <destination>` is invoked without `--dry-run` → attempt to emit a submit operation receipt.
+- No receipt flag and no receipt configuration → emit no receipt; existing human output remains unchanged.
+
+| Receipt destination | Behavior |
+|---------------------|----------|
+| `off` | disable receipt emission |
+| `-` | emit one JSON document on standard output |
+| any other value | interpret as a filesystem path |
+
+- `--dry-run` and `--receipt <destination>` (other than `off`) are both provided → report an invocation error explaining receipts are only available for real executions, and perform no mutations.
+- `.stack-pr.cfg` contains `receipt.submit = <destination>` → use that destination unless `--receipt` overrides it; the default when omitted is `off`.
+- A receipt is a single JSON object with fields:
+
+| Field | Content |
+|-------|---------|
+| `schema_version` | non-empty string |
+| `command` | `stack-pr submit` or `stack-pr export` |
+| `status` | `ok`, `failed`, or `partial_failure` |
+| `side_effects` | `true` |
+| `repo` | repository root, original branch, remote, target, base, head, template when available |
+| `stack` | size, per-entry commit SHA, title, head branch, base branch, PR URL when known |
+| `operations` | array of operation entries |
+
+- Side-effecting operation completes successfully → append an entry with `type`, `status: ok`, and operation-specific details.
+- Side-effecting operation fails after receipt collection begins → append or update an entry with `status: failed` and an error message.
+- At least one operation succeeds followed by a failed operation → top-level `status` is `partial_failure`.
+- Submit/export completes successfully → top-level `status` is `ok`.
+- Branch, push, PR, metadata, or cleanup operations occur → record entries identifying the affected branches, remotes, PRs, commits, or error messages.
+- Submit/export fails and recovery attempts original-branch checkout or stash pop → record recovery operation entries with success or failure status.
+- Effective receipt destination is a filesystem path and writing fails → return a non-zero error explaining receipt emission failed.
+- Effective receipt destination is `off` → never attempt to write a receipt.

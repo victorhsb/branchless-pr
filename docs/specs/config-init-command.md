@@ -1,35 +1,24 @@
-## Purpose
+---
+title: config init
+status: stable
+---
 
-Define the behavior of the `stack-pr config init` subcommand, which scaffolds a new `.stack-pr.cfg` file with documented defaults without overwriting an existing file.
-## Requirements
-### Requirement: Config init command generates starter config file
+# Config init
 
-The system SHALL provide a `config init` subcommand that writes a `.stack-pr.cfg` file at the repository root with sensible defaults and inline documentation.
+## Overview
 
-#### Scenario: Successful generation
+`stack-pr config init` scaffolds a new `.stack-pr.cfg` file with documented defaults, without overwriting an existing file.
 
-- **WHEN** the user runs `stack-pr config init` inside a repository that has no `.stack-pr.cfg`
-- **THEN** a `.stack-pr.cfg` file is created at `<repo-root>/.stack-pr.cfg` containing all default sections and keys, each with a descriptive comment
+## Behavior
 
-#### Scenario: Overwrite guard
+### File generation
 
-- **WHEN** the user runs `stack-pr config init` inside a repository that already has `.stack-pr.cfg`
-- **THEN** the command exits with a non-zero status and prints an error indicating the file already exists
+- Run inside a repository that has no `.stack-pr.cfg` → create `<repo-root>/.stack-pr.cfg` containing all default sections and keys, each with a descriptive comment.
+- Run inside a repository that already has `.stack-pr.cfg` → exit non-zero and print an error indicating the file already exists.
 
-### Requirement: Generated file mirrors current defaults
+### Defaults parity
 
-The generated configuration SHALL contain, at minimum, the same keys and values as the built-in `config.Defaults()` map, organised into sections `[common]`, `[repo]`, `[github]`, `[land]`, and `[comments]`.
+The generated configuration contains, at minimum, the same keys and values as the built-in `config.Defaults()` map, organised into sections `[common]`, `[repo]`, `[github]`, `[land]`, and `[comments]`.
 
-#### Scenario: Defaults parity
-
-- **WHEN** the user runs `stack-pr config init` successfully
-- **THEN** parsing the generated file with `config.Load` and merging with `config.Defaults()` produces no new keys in either direction
-
-#### Scenario: Native Stack default documented
-
-- **WHEN** the user runs `stack-pr config init` successfully
-- **THEN** the generated `[github]` section SHALL contain `native_stacks = off`
-- **AND** inline comments SHALL document the `off`, `auto`, and `required` values
-- **AND** the comments SHALL note that enabling native stacks changes GitHub CI, rules, review, and landing behavior
-- **AND** the comments SHALL state that native Stack operations use the REST API through the base `gh` CLI
-- **AND** the comments SHALL NOT require the `github/gh-stack` extension
+- Successful generation → parsing the generated file with `config.Load` and merging with `config.Defaults()` produces no new keys in either direction.
+- Successful generation → the `[github]` section contains `native_stacks = off`; inline comments document the `off`, `auto`, and `required` values, note that enabling native stacks changes GitHub CI, rules, review, and landing behavior, and state that native Stack operations use the REST API through the base `gh` CLI; the comments do not require the `github/gh-stack` extension.

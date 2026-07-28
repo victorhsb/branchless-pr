@@ -1,213 +1,87 @@
-# stack-comments-report Specification
+---
+title: comments report
+status: stable
+---
 
-## Purpose
+# Comments Report
 
-Provide a read-only comments report command that helps users and agents inspect GitHub pull request feedback across the current stack.
+## Overview
 
-## Requirements
+`stack-pr comments` is a read-only report that collects review and conversation comments for pull requests represented by the current stack metadata, helping users and agents inspect GitHub pull request feedback across the current stack.
 
-### Requirement: Stack Comments Command
+## Behavior
 
-The `stack-pr` CLI SHALL provide a top-level `comments` command that collects review and conversation comments for pull requests represented by the current stack metadata.
+### Command and stack discovery
 
-#### Scenario: Comments command is available
+- `stack-pr comments --help` → describe a read-only command for collecting comments across the current stack's pull requests; help includes the supported output format and filtering flags.
+- Invoked inside a repository with a non-empty stack → discover stack entries using the same base, head, branch-template, and stack metadata rules as other stack inspection commands, and associate fetched comments with the stack entry and pull request they belong to.
+- Stack entry has no pull request metadata → report that entry as missing PR metadata and continue collecting comments for other entries that have PR metadata.
 
-- **WHEN** the user runs `stack-pr comments --help`
-- **THEN** the CLI SHALL describe a read-only command for collecting comments across the current stack's pull requests
-- **AND** the help SHALL include the supported output format and filtering flags
+### Read-only behavior
 
-#### Scenario: Stack PRs are discovered
+Comments never mutates local Git state, remote branches, commit messages, or GitHub pull request state.
 
-- **WHEN** `stack-pr comments` is invoked inside a repository with a non-empty stack
-- **THEN** the command SHALL discover stack entries using the same base, head, branch-template, and stack metadata rules as other stack inspection commands
-- **AND** the command SHALL associate fetched comments with the stack entry and pull request they belong to
+- Invoked while tracked files have staged or unstaged changes → still attempt to produce a comments report; never require the user to clean or stash the worktree first.
+- Fetching comment information from GitHub → use read-only GitHub operations; never create, edit, close, merge, mark ready, resolve, or delete pull requests or comments.
+- Runs successfully or with reportable per-PR failures → never check out branches, create branches, delete branches, amend commits, rebase, stash, push, or fetch in a way that mutates repository state.
 
-#### Scenario: Missing PR metadata is reported
+### Comment sources
 
-- **WHEN** a stack entry has no pull request metadata
-- **THEN** the command SHALL report that entry as missing PR metadata
-- **AND** the command SHALL continue collecting comments for other entries that have PR metadata
+The report includes GitHub pull request feedback from all sources available through `gh`:
 
-### Requirement: Read-Only Behavior
+| Kind | Source | Fields |
+|------|--------|--------|
+| `conversation` | issue-style conversation comments | author, body, creation time, update time when available, URL when available, owning pull request |
+| `review` | submitted reviews | author, body when present, submitted time when available, state when available, URL when available, owning pull request |
+| `review_thread` | review threads | resolution state when available, file path when available, line or range context when available, URL when available, comments or replies in chronological order when available |
+| `review_comment` | review comments exposed separately from review threads | author, body, creation time, update time when available, URL when available, path when available, line context when available |
 
-The `comments` command SHALL NOT mutate local Git state, remote branches, commit messages, or GitHub pull request state.
+### Text output (default)
 
-#### Scenario: Dirty worktree is allowed
+Default output is human-readable Markdown-compatible text grouped by stack entry and pull request.
 
-- **WHEN** `stack-pr comments` is invoked while tracked files have staged or unstaged changes
-- **THEN** the command SHALL still attempt to produce a comments report
-- **AND** it SHALL NOT require the user to clean or stash the worktree first
+- Invoked without `--format` → produce text output grouping comments by stack entry in deterministic stack order; each group identifies the commit title, short SHA, pull request number, pull request URL, head branch, and base branch when known.
+- All stack entries with PR metadata can be read and no matching comments exist → clearly state that no matching comments were found; still identify the inspected stack and PR count.
+- One or more pull requests cannot be read but at least one stack entry is reportable → include a warning for each unreadable pull request or stack entry and continue rendering available comments from other pull requests.
 
-#### Scenario: No GitHub writes
+### JSON output
 
-- **WHEN** `stack-pr comments` fetches comment information from GitHub
-- **THEN** it SHALL use read-only GitHub operations
-- **AND** it SHALL NOT create, edit, close, merge, mark ready, resolve, or delete pull requests or comments
+- `--format json` → stdout contains exactly one JSON object including `schema_version`, `command`, `repository`, `range`, `stack`, and `pull_requests` fields, with no ANSI escape sequences, terminal hyperlinks, or human progress logs.
+- Stack entry → include commit SHA, short SHA, title, stack index, head branch, base branch, PR URL when known, PR number when known, and a status indicating whether comments were fetched, missing, empty, or failed.
+- Comment, review, or thread item → include a stable `id` when GitHub provides one, `kind`, owning PR number, author, body, URL when available, timestamps when available, and optional location or resolution fields when available.
+- `--format` value other than `text` or `json` → exit non-zero with a clear error message.
 
-#### Scenario: No local stack mutation
+### Filtering
 
-- **WHEN** `stack-pr comments` runs successfully or with reportable per-PR failures
-- **THEN** it SHALL NOT checkout branches, create branches, delete branches, amend commits, rebase, stash, push, or fetch in a way that mutates repository state
+Filtering flags reduce output without changing the underlying stack.
 
-### Requirement: Comment Sources
+| Flag | Behavior |
+|------|----------|
+| `--unresolved-only` | include only comments or threads that GitHub identifies as unresolved or otherwise requiring attention; never guess unresolved state for comment kinds that do not expose resolution status |
+| `--kind <kinds>` | include only the requested comment kinds; reject unsupported kind values with a clear error |
+| `--author <login>` | include only matching comments, reviews, or threads authored by that GitHub login; pull request groups with no matching items are shown as empty rather than omitted in JSON output |
 
-The comments report SHALL include GitHub pull request feedback from conversation comments, reviews, review comments, and review threads when those sources are available through `gh`.
+### Ignored comment authors
 
-#### Scenario: Conversation comments are included
+`.stack-pr.cfg` can exclude feedback authored by configured GitHub logins from comments report output.
 
-- **WHEN** a stack pull request has issue-style conversation comments
-- **THEN** the report SHALL include those comments with kind `conversation`
-- **AND** each comment SHALL include author, body, creation time, update time when available, URL when available, and the owning pull request
+| `comments.ignore_authors` | Behavior |
+|---------------------------|----------|
+| non-empty list (e.g. `ci-bot,release-bot`), no author override | exclude comments, reviews, review comments, review-thread items, and review-thread replies authored by the listed logins |
+| key omitted | exclude no feedback because of ignored-author configuration |
+| empty value (`comments.ignore_authors =`) | exclude no feedback because of ignored-author configuration |
 
-#### Scenario: Reviews are included
+- Matching is case-insensitive: `comments.ignore_authors = CI-Bot` treats feedback authored by `ci-bot` as authored by an ignored login.
+- Ignored-author filtering is applied before positive author filtering: `comments.ignore_authors = ci-bot` with `--author ci-bot` → the report contains no `ci-bot` feedback.
+- Review thread contains replies from both an ignored and a non-ignored author → exclude the ignored-author replies and retain the thread with the remaining non-ignored replies when the thread still has reportable feedback.
 
-- **WHEN** a stack pull request has submitted reviews
-- **THEN** the report SHALL include those reviews with kind `review`
-- **AND** each review SHALL include author, body when present, submitted time when available, state when available, URL when available, and the owning pull request
+### Error handling
 
-#### Scenario: Review threads are included
+Invocation errors are distinguished from reportable per-stack-entry failures.
 
-- **WHEN** a stack pull request has review threads
-- **THEN** the report SHALL include those threads with kind `review_thread`
-- **AND** each thread SHALL include resolution state when available, file path when available, line or range context when available, URL when available, and comments or replies in chronological order when available
-
-#### Scenario: Review comments are included
-
-- **WHEN** GitHub exposes review comments separately from review threads
-- **THEN** the report SHALL include those comments with kind `review_comment`
-- **AND** each comment SHALL include author, body, creation time, update time when available, URL when available, path when available, and line context when available
-
-### Requirement: Human-Readable Output
-
-The `comments` command SHALL default to a human-readable Markdown-compatible text output grouped by stack entry and pull request.
-
-#### Scenario: Default output is text
-
-- **WHEN** `stack-pr comments` is invoked without `--format`
-- **THEN** the command SHALL produce text output
-- **AND** the output SHALL group comments by stack entry in deterministic stack order
-- **AND** each group SHALL identify the commit title, short SHA, pull request number, pull request URL, head branch, and base branch when known
-
-#### Scenario: Empty comments text report
-
-- **WHEN** all stack entries with PR metadata can be read and no matching comments exist
-- **THEN** text output SHALL clearly state that no matching comments were found
-- **AND** it SHALL still identify the inspected stack and PR count
-
-#### Scenario: Per-PR failures in text report
-
-- **WHEN** one or more pull requests cannot be read but at least one stack entry is reportable
-- **THEN** text output SHALL include a warning for each unreadable pull request or stack entry
-- **AND** it SHALL continue rendering available comments from other pull requests
-
-### Requirement: JSON Output
-
-The `comments` command SHALL support `--format json` and emit a single machine-readable JSON object suitable for agents.
-
-#### Scenario: JSON output is structured
-
-- **WHEN** `stack-pr comments --format json` is invoked
-- **THEN** stdout SHALL contain exactly one JSON object
-- **AND** the object SHALL include `schema_version`, `command`, `repository`, `range`, `stack`, and `pull_requests` fields
-- **AND** it SHALL contain no ANSI escape sequences, terminal hyperlinks, or human progress logs
-
-#### Scenario: Stack entry JSON fields
-
-- **WHEN** JSON output includes a stack entry
-- **THEN** the entry SHALL include commit SHA, short SHA, title, stack index, head branch, base branch, PR URL when known, PR number when known, and a status indicating whether comments were fetched, missing, empty, or failed
-
-#### Scenario: Comment JSON fields
-
-- **WHEN** JSON output includes a comment, review, or thread item
-- **THEN** the item SHALL include a stable `id` when GitHub provides one, `kind`, owning PR number, author, body, URL when available, timestamps when available, and optional location or resolution fields when available
-
-#### Scenario: Unknown format is rejected
-
-- **WHEN** `stack-pr comments --format <unknown>` is invoked with a value other than `text` or `json`
-- **THEN** the command SHALL exit non-zero with a clear error message
-
-### Requirement: Filtering
-
-The `comments` command SHALL provide filtering flags that reduce output without changing the underlying stack.
-
-#### Scenario: Unresolved-only filtering
-
-- **WHEN** `stack-pr comments --unresolved-only` is invoked
-- **THEN** the report SHALL include only comments or threads that GitHub identifies as unresolved or otherwise requiring attention
-- **AND** the report SHALL NOT guess unresolved state for comment kinds that do not expose resolution status
-
-#### Scenario: Comment kind filtering
-
-- **WHEN** `stack-pr comments --kind <kinds>` is invoked
-- **THEN** the report SHALL include only the requested comment kinds
-- **AND** unsupported kind values SHALL be rejected with a clear error
-
-#### Scenario: Author filtering
-
-- **WHEN** `stack-pr comments --author <login>` is invoked
-- **THEN** the report SHALL include only matching comments, reviews, or threads authored by that GitHub login
-- **AND** pull request groups with no matching items SHALL be shown as empty rather than omitted in JSON output
-
-### Requirement: Ignored Comment Authors Configuration
-
-The `comments` command SHALL support `.stack-pr.cfg` configuration that excludes feedback authored by configured GitHub logins from comments report output.
-
-#### Scenario: Ignored authors are omitted by default
-
-- **WHEN** `.stack-pr.cfg` contains `comments.ignore_authors = ci-bot,release-bot`
-- **AND** `stack-pr comments` is invoked without an author override
-- **THEN** the report SHALL exclude comments, reviews, review comments, review-thread items, and review-thread replies authored by `ci-bot` or `release-bot`
-
-#### Scenario: Missing ignore configuration preserves existing behavior
-
-- **WHEN** `.stack-pr.cfg` omits `comments.ignore_authors`
-- **THEN** `stack-pr comments` SHALL NOT exclude any feedback because of ignored-author configuration
-
-#### Scenario: Empty ignore configuration preserves existing behavior
-
-- **WHEN** `.stack-pr.cfg` contains `comments.ignore_authors =`
-- **THEN** `stack-pr comments` SHALL NOT exclude any feedback because of ignored-author configuration
-
-#### Scenario: Ignored author matching is case-insensitive
-
-- **WHEN** `.stack-pr.cfg` contains `comments.ignore_authors = CI-Bot`
-- **AND** GitHub returns feedback authored by `ci-bot`
-- **THEN** that feedback SHALL be treated as authored by an ignored login
-
-#### Scenario: Ignored authors combine with author filtering
-
-- **WHEN** `.stack-pr.cfg` contains `comments.ignore_authors = ci-bot`
-- **AND** `stack-pr comments --author ci-bot` is invoked
-- **THEN** the report SHALL contain no `ci-bot` feedback because ignored-author filtering is applied before positive author filtering
-
-#### Scenario: Mixed-author review threads retain non-ignored replies
-
-- **WHEN** a review thread contains replies from both an ignored author and a non-ignored author
-- **THEN** the report SHALL exclude the ignored-author replies
-- **AND** it SHALL retain the thread with the remaining non-ignored replies when the thread still has reportable feedback
-
-### Requirement: Error Handling
-
-The `comments` command SHALL distinguish invocation errors from reportable per-stack-entry failures.
-
-#### Scenario: Missing gh is an invocation error
-
-- **WHEN** `stack-pr comments` is invoked and the GitHub CLI is not installed
-- **THEN** the command SHALL exit non-zero with a clear message that `gh` is required
-
-#### Scenario: GitHub authentication failure
-
-- **WHEN** GitHub rejects all comment queries because the user is not authenticated or authorized
-- **THEN** the command SHALL exit non-zero with a clear authentication or authorization message
-
-#### Scenario: Individual PR read failure
-
-- **WHEN** one pull request cannot be read because it is missing, inaccessible, deleted, or otherwise fails while other pull requests can be read
-- **THEN** the command SHALL include that failure in the report for the relevant stack entry
-- **AND** the command SHALL continue reporting comments for readable pull requests
-
-#### Scenario: Empty stack
-
-- **WHEN** `stack-pr comments` is invoked and the stack is empty
-- **THEN** the command SHALL produce an empty-stack report in the requested format
-- **AND** it SHALL NOT query GitHub for pull request comments
+| Condition | Behavior |
+|-----------|----------|
+| GitHub CLI is not installed | exit non-zero with a clear message that `gh` is required |
+| GitHub rejects all comment queries because the user is not authenticated or authorized | exit non-zero with a clear authentication or authorization message |
+| One pull request cannot be read (missing, inaccessible, deleted, or otherwise failing) while other pull requests can be read | include that failure in the report for the relevant stack entry; continue reporting comments for readable pull requests |
+| Stack is empty | produce an empty-stack report in the requested format; do not query GitHub for pull request comments |
