@@ -47,7 +47,7 @@ The system SHALL configure GitHub native Stack integration with `github.native_s
 
 ### Requirement: Native Stack Eligibility
 
-The system SHALL publish only branchless-pr stacks that satisfy the documented native Stack request, repository, ref-chain, and PR-state constraints while preserving the one-commit-per-PR invariant from `SPEC.md` section 5.
+The system SHALL publish only branchless-pr stacks that satisfy the documented native Stack request, repository, ref-chain, and PR-state constraints while preserving the one-commit-per-PR invariant (one commit maps to exactly one PR).
 
 #### Scenario: Multi-PR same-repository stack is eligible
 - **GIVEN** a branchless-pr stack contains between 2 and 100 PRs
@@ -228,16 +228,16 @@ Native integration SHALL NOT replace branchless-pr's commit-oriented local ident
 - **THEN** branchless-pr SHALL NOT infer or rewrite local commits solely from that remote Stack
 
 ### Requirement: Explicit Go Port Behavior
-GitHub native Stack integration SHALL be an explicit Go-port extension to the Python behavior documented in `SPEC.md`.
+GitHub native Stack integration SHALL be an explicit Go-port extension to the base behavior documented in `openspec/specs/`.
 
 #### Scenario: Legacy compatibility when disabled
 - **GIVEN** `github.native_stacks = off`
 - **WHEN** submit, export, view, land, or abandon runs
-- **THEN** behavior SHALL remain compatible with the non-native algorithms in `SPEC.md` sections 13 through 17
+- **THEN** behavior SHALL remain compatible with the non-native algorithms in `openspec/specs/` (`submit-export`, `land`, `abandon`, and `view`)
 
 ### Requirement: Native REST Representation
 
-The system SHALL decode and validate the published pull-request membership and Stack resource schemas defined in `GITHUB_STACKS_REST_API.md` sections 5 and 6.
+The system SHALL decode and validate the published pull-request membership and Stack resource schemas (implemented in `internal/nativestacks`; see `REST_ACCEPTANCE_TEST_MATRIX.md` for acceptance evidence).
 
 #### Scenario: Stacked pull request membership is decoded
 

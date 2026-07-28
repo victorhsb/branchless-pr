@@ -322,6 +322,112 @@ Submit/export SHALL restore repository state after mutations.
 - **WHEN** post-export tips are enabled
 - **THEN** the command SHALL print guidance for the user after submission
 
+### Requirement: Automatic stash lifecycle recovery
+
+When non-dry-run submit/export creates an automatic stash, the command SHALL
+attempt to restore that stash before returning from every subsequent success or
+failure path. This requirement implements the Python-compatible `finally`
+semantics documented in `SPEC.md` section 8.
+
+#### Scenario: Clean validation fails after stashing
+
+- **GIVEN** submit/export created an automatic stash
+- **WHEN** the post-stash clean working-tree validation fails
+- **THEN** the command SHALL attempt to restore the automatic stash before returning the validation error
+
+#### Scenario: Target validation fails after stashing
+
+- **GIVEN** submit/export created an automatic stash
+- **WHEN** remote target validation fails before command dispatch
+- **THEN** the command SHALL attempt to restore the automatic stash before returning the target error
+
+#### Scenario: Merge-base deduction fails after stashing
+
+- **GIVEN** submit/export created an automatic stash
+- **WHEN** merge-base deduction fails before command dispatch
+- **THEN** the command SHALL attempt to restore the automatic stash before returning the merge-base error
+
+#### Scenario: Command execution succeeds
+
+- **GIVEN** submit/export created an automatic stash and pre-run initialization succeeded
+- **WHEN** command execution returns successfully
+- **THEN** the command SHALL restore the automatic stash before the invocation returns
+
+#### Scenario: Command execution fails
+
+- **GIVEN** submit/export created an automatic stash and pre-run initialization succeeded
+- **WHEN** command execution returns an error or panics
+- **THEN** recovery SHALL attempt to restore the automatic stash before the invocation returns
+
+#### Scenario: Pre-run restoration fails
+
+- **GIVEN** post-stash pre-run initialization fails
+- **WHEN** restoring the automatic stash also fails
+- **THEN** the returned error SHALL preserve both the initialization failure and the restoration failure
+
+#### Scenario: No automatic stash was created
+
+- **GIVEN** the working tree was clean or dry-run prevented automatic stashing
+- **WHEN** initialization or command execution returns
+- **THEN** the command SHALL NOT attempt to pop a stash
+
+### Requirement: Exact automatic stash identity
+
+Non-dry-run submit/export SHALL determine automatic stash creation from Git
+reference state rather than human-facing command output, SHALL retain the exact
+created stash identity, and SHALL restore and remove only that stash. This is an
+explicit Go-port safety improvement over Python `stack-pr`'s boolean and top-pop
+behavior documented in `SPEC.md` section 8.
+
+#### Scenario: Clean working tree
+
+- **GIVEN** no tracked working-tree changes exist
+- **WHEN** automatic stash creation runs
+- **THEN** the command SHALL record no automatic stash regardless of Git's human-facing output
+- **AND** recovery SHALL NOT apply or drop any existing user stash
+
+#### Scenario: Localized or unexpected stash output
+
+- **GIVEN** `git stash push` emits localized, empty, or unexpected human-facing output
+- **WHEN** Git changes `refs/stash` to a new stash commit
+- **THEN** the command SHALL record the new commit as the automatic stash
+
+#### Scenario: Pre-existing user stash
+
+- **GIVEN** a user stash exists before automatic stash creation
+- **WHEN** the automatic stash is successfully restored
+- **THEN** the pre-existing user stash SHALL remain unchanged
+
+#### Scenario: Newer user stash
+
+- **GIVEN** another stash entry is added above the recorded automatic stash before recovery
+- **WHEN** automatic stash restoration runs
+- **THEN** the command SHALL apply and remove the recorded automatic stash
+- **AND** the newer user stash SHALL remain unchanged
+
+#### Scenario: Successful exact restoration
+
+- **GIVEN** a recorded automatic stash exists and applies cleanly
+- **WHEN** recovery runs
+- **THEN** the exact automatic stash changes SHALL be restored to the working tree
+- **AND** only its matching stash reflog entry SHALL be removed
+- **AND** invocation state SHALL no longer record an automatic stash
+
+#### Scenario: Restoration conflict
+
+- **GIVEN** the recorded automatic stash conflicts with current working-tree state
+- **WHEN** recovery attempts to apply it
+- **THEN** recovery SHALL return an actionable error identifying the automatic stash
+- **AND** the automatic stash entry SHALL remain available for manual recovery
+- **AND** invocation state SHALL retain the automatic stash identity
+
+#### Scenario: Automatic stash entry is missing
+
+- **GIVEN** invocation state records an automatic stash whose reflog entry no longer exists
+- **WHEN** recovery runs
+- **THEN** recovery SHALL return an actionable error
+- **AND** it SHALL NOT apply or remove a different stash entry
+
 ### Requirement: Native Stack Submit Reconciliation
 
 When native integration is enabled, submit/export SHALL reconcile the final submitted PR chain with GitHub after ordinary PR and branch publication succeeds.

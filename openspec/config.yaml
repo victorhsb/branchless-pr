@@ -5,7 +5,7 @@ context: |
   Binary name: bpr (stack-pr symlink for backward compat).
   Tech stack: Go 1.25+, Cobra CLI framework, no Go GitHub SDK.
   All subprocess calls go through internal/shell — never os/exec directly.
-  SPEC.md is the behavioral source of truth; if a port decision contradicts SPEC.md, the spec wins.
+  openspec/specs/ holds the behavioral source of truth; if a port decision contradicts a spec, the spec wins.
   Config: INI format in .stack-pr.cfg, sections: [common], [repo], [comments], [land].
   land subcommand is removable via land.style = disable.
   --dry-run for submit/export: no local Git mutation, no remote push, no PR writes, stash skipped.
@@ -16,12 +16,12 @@ context: |
 
 rules:
   proposal:
-    - Reference SPEC.md sections for any behavioral changes
+    - Reference relevant openspec/specs/ sections for any behavioral changes
     - Identify if change affects the land subcommand (gated by config)
     - Include a "Port compatibility" section noting divergence from Python stack-pr
   specs:
     - Use Given/When/Then format for scenarios
-    - Reference existing SPEC.md sections before inventing new behavior
+    - Reference existing openspec/specs/ sections before inventing new behavior
     - If behavior differs from Python stack-pr, mark it as an explicit port decision
   design:
     - Must not introduce a Go GitHub SDK dependency
