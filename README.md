@@ -1,10 +1,10 @@
-# stack-pr (Go port)
+# branchless-pr
 
-`stack-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests. This is the Go port of the [Modular `stack-pr`](https://github.com/modular/stack-pr) Python tool. It preserves the original tool's algorithms and CLI surface.
+`branchless-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests. This is the Go port of the [Modular `stack-pr`](https://github.com/modular/stack-pr) Python tool. It preserves the original tool's algorithms and CLI surface.
 
 A stack is the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`); every higher PR targets the generated branch for the previous commit. This way each PR review shows only one logical commit while still preserving dependency order.
 
-> **Alias:** `bpr` ("branchless PR") is the primary binary name. A `stack-pr`
+> **Alias:** `bpr` ("branchless PR") is the primary executable name. A `stack-pr`
 > symlink is provided for backward compatibility with the original Python tool.
 
 ## Install
@@ -59,7 +59,7 @@ The `agent prompt` subcommand emits versioned, deterministic guidance covering e
 
 ## Quick start
 
-> All `stack-pr` commands can also be run as `bpr` (the primary binary name).
+> All examples use `bpr` (the primary executable name). `bpr` and the historical `stack-pr` symlink are interchangeable.
 
 ```bash
 # create some commits on a feature branch
@@ -67,38 +67,38 @@ git checkout -b my-feature main
 # ... commit a few times ...
 
 # inspect the stack
-stack-pr view
+bpr view
 
 # collect review comments across the stack
-stack-pr comments
+bpr comments
 
 # inspect CI checks and brief review-attention state across the stack
-stack-pr checks
+bpr checks
 
 # submit / update the stack of PRs
-stack-pr submit
+bpr submit
 
 # land the bottom-most PR
-stack-pr land
+bpr land
 
 # remove all stack metadata and clean up generated branches
-stack-pr abandon
+bpr abandon
 ```
 
 ## Commands
 
 | Command | Description |
 | ------- | ----------- |
-| `stack-pr submit` (alias: `export`) | Create or update PRs for each commit. Optionally reconcile with a GitHub native Stack. |
-| `stack-pr view` | Inspect the stack without modifying anything. Includes native Stack metadata in JSON when enabled. |
-| `stack-pr comments` | Collect PR comments, reviews, and review threads across the stack. |
-| `stack-pr checks` | Report all CI checks and brief review-attention state across the stack. |
-| `stack-pr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. Refuses to land stacks linked to a GitHub native Stack. |
-| `stack-pr abandon` | Strip stack metadata and delete generated branches. Unstacks matching GitHub native Stacks before deleting remote branches. |
-| `stack-pr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
-| `stack-pr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
-| `stack-pr agent prompt [topic]` | Emit static, versioned guidance for LLM agents. |
-| `stack-pr agent diagnose [--format text\|json] [--online]` | Emit a read-only, best-effort diagnostic report for agents. |
+| `bpr submit` (alias: `export`) | Create or update PRs for each commit. Optionally reconcile with a GitHub native Stack. |
+| `bpr view` | Inspect the stack without modifying anything. Includes native Stack metadata in JSON when enabled. |
+| `bpr comments` | Collect PR comments, reviews, and review threads across the stack. |
+| `bpr checks` | Report all CI checks and brief review-attention state across the stack. |
+| `bpr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. Refuses to land stacks linked to a GitHub native Stack. |
+| `bpr abandon` | Strip stack metadata and delete generated branches. Unstacks matching GitHub native Stacks before deleting remote branches. |
+| `bpr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
+| `bpr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
+| `bpr agent prompt [topic]` | Emit static, versioned guidance for LLM agents. |
+| `bpr agent diagnose [--format text\|json] [--online]` | Emit a read-only, best-effort diagnostic report for agents. |
 
 ## Shared options
 
@@ -127,7 +127,7 @@ stack-pr abandon
 
 ## Previewing with `--dry-run`
 
-`stack-pr submit --dry-run` (and its alias `stack-pr export --dry-run`) prints
+`bpr submit --dry-run` (and its alias `bpr export --dry-run`) prints
 the plan that a real submit would execute — per stack entry: the action
 (create or update PR), commit title, generated head branch, computed base
 branch, existing PR URL when present, draft state for new PRs, and whether
@@ -164,7 +164,7 @@ Native writes are not blindly retried. If a transport or server failure leaves t
 
 ## Stack comments
 
-`stack-pr comments` prints a read-only report of pull request feedback across
+`bpr comments` prints a read-only report of pull request feedback across
 the current stack. It groups conversation comments, submitted reviews, review
 comments, and review threads by stack entry and PR. The command does not
 checkout branches, amend commits, push, or write to GitHub.
@@ -173,10 +173,10 @@ Set `comments.ignore_authors` in `.stack-pr.cfg` to hide noisy automation
 accounts from comments output by default.
 
 ```bash
-stack-pr comments
-stack-pr comments --unresolved-only
-stack-pr comments --kind review_thread --format json
-stack-pr comments --author octocat
+bpr comments
+bpr comments --unresolved-only
+bpr comments --kind review_thread --format json
+bpr comments --author octocat
 ```
 
 | Flag | Description |
@@ -188,18 +188,18 @@ stack-pr comments --author octocat
 
 ## Stack checks
 
-`stack-pr checks` prints a read-only report of GitHub check state across the
+`bpr checks` prints a read-only report of GitHub check state across the
 current stack. It reports all checks by default, not only required checks, and
 includes stable failed-check IDs so humans and agents can identify what to fix.
 It also includes brief comment/review counts and bounded snippets; use
-`stack-pr comments` for full comment inspection.
+`bpr comments` for full comment inspection.
 
 ```bash
-stack-pr checks
-stack-pr checks --failed-only
-stack-pr checks --required-only
-stack-pr checks --pr 123 --format json
-stack-pr checks --commit abc123
+bpr checks
+bpr checks --failed-only
+bpr checks --required-only
+bpr checks --pr 123 --format json
+bpr checks --commit abc123
 ```
 
 | Flag | Description |
@@ -212,15 +212,15 @@ stack-pr checks --commit abc123
 
 ## Agent prompt
 
-`stack-pr agent prompt [topic]` prints deterministic guidance for LLM agents.
+`bpr agent prompt [topic]` prints deterministic guidance for LLM agents.
 It is side-effect-free and runs without a git repository or authenticated `gh`.
 Supported topics are `overview`, `view`, `submit`, `land`, `abandon`,
 `recovery`, and `all` (the default).
 
 ```bash
-stack-pr agent prompt
-stack-pr agent prompt submit
-stack-pr agent prompt submit --format json
+bpr agent prompt
+bpr agent prompt submit
+bpr agent prompt submit --format json
 ```
 
 Use `--format text` for markdown (default) or `--format json` for a structured
@@ -229,7 +229,7 @@ metadata.
 
 ## Agent diagnose
 
-`stack-pr agent diagnose` inspects repository, stack, and PR metadata state and
+`bpr agent diagnose` inspects repository, stack, and PR metadata state and
 prints a read-only diagnostic report. It is best-effort: reportable conditions
 such as a dirty working tree, missing PR metadata, a rebase in progress, or even
 being outside a Git repository are represented in the payload instead of causing
@@ -237,9 +237,9 @@ the command to fail. The command exits `0` for those reportable outcomes; check
 the top-level `status` and individual check entries for severity.
 
 ```bash
-stack-pr agent diagnose
-stack-pr agent diagnose --format json
-stack-pr agent diagnose --online
+bpr agent diagnose
+bpr agent diagnose --format json
+bpr agent diagnose --online
 ```
 
 | Flag | Description |
@@ -258,18 +258,18 @@ The initial JSON schema version is `"1"`. The JSON envelope contains:
   also include `blocks` and `suggested_fix`.
 - `recommendation`: a safe next action with `command`, `reason`,
   `side_effects`, `requires_confirmation`, and optional
-  `potential_next_actions`. `stack-pr land` is never the primary
+  `potential_next_actions`. `bpr land` is never the primary
   recommendation; if surfaced, it requires explicit confirmation.
 
 ## Config init
 
-`stack-pr config init` scaffolds a starter `.stack-pr.cfg` at the repository root with sensible defaults and inline documentation. It fails safely if the file already exists.
+`bpr config init` scaffolds a starter `.stack-pr.cfg` at the repository root with sensible defaults and inline documentation. It fails safely if the file already exists.
 
 ```bash
-stack-pr config init
+bpr config init
 ```
 
-After the file is created you can edit it by hand or set individual values inline with `stack-pr config set`.
+After the file is created you can edit it by hand or set individual values inline with `bpr config set`.
 
 ## Configuration
 
@@ -283,7 +283,7 @@ Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). Th
 |-----|------|---------|-------------|
 | `verbose` | bool | `false` | Show verbose subprocess output (`git` / `gh`) for every command. |
 | `hyperlinks` | bool | `true` | Enable terminal hyperlinks (e.g. clickable PR URLs). Use `--no-hyperlinks` to disable on a single run. |
-| `draft` | bool | `false` | Create **new** PRs as drafts by default. Only affects PRs created with `stack-pr submit`. |
+| `draft` | bool | `false` | Create **new** PRs as drafts by default. Only affects PRs created with `bpr submit`. |
 | `keep_body` | bool | `false` | Preserve the existing PR body after the generated stack TOC on update. Without this, the body is replaced. |
 | `stash` | bool | `false` | Automatically stash uncommitted changes before `submit` / `export`. Skipped under `--dry-run`. |
 | `show_tips` | bool | `true` | Show contextual tips/hints after commands (e.g. next recommended action). |
@@ -301,7 +301,7 @@ Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). Th
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `ignore_authors` | string | *(empty)* | Comma-separated GitHub usernames whose review comments are hidden from `stack-pr comments` output by default. |
+| `ignore_authors` | string | *(empty)* | Comma-separated GitHub usernames whose review comments are hidden from `bpr comments` output by default. |
 
 #### `[land]`
 
