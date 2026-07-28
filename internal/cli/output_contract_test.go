@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -42,22 +41,5 @@ func TestRootCommandSilencesCobraErrorPreambles(t *testing.T) {
 	}
 	if !cmd.SilenceErrors {
 		t.Fatal("root command should silence Cobra error preambles")
-	}
-}
-
-func TestOutputContractDocumented(t *testing.T) {
-	data, err := os.ReadFile("../../SPEC.md")
-	if err != nil {
-		t.Fatalf("read SPEC.md: %v", err)
-	}
-	text := string(data)
-	for _, want := range []string{
-		"Commands do not print command banners",
-		"do not print generic success/failure markers",
-		"without Cobra's extra `Error:` or usage preambles",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("SPEC.md missing output contract text %q", want)
-		}
 	}
 }

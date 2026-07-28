@@ -1,8 +1,8 @@
 # REST acceptance test matrix
 
-This maps every acceptance criterion in `GITHUB_STACKS_REST_API.md` section 13
-to automated evidence. The API remains private preview; this matrix covers the
-fixture and orchestration contract, not the separate live-validation items.
+This maps every REST acceptance criterion to automated evidence. The API
+remains private preview; this matrix covers the fixture and orchestration
+contract, not the separate live-validation items.
 
 | # | Acceptance criterion | Automated evidence |
 | --- | --- | --- |

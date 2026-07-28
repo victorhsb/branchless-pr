@@ -1,5 +1,5 @@
 // Package shell wraps subprocess execution, matching the semantics of the
-// Python stack-pr tool (see SPEC.md §10).
+// Python stack-pr tool (https://github.com/modular/stack-pr).
 package shell
 
 import (

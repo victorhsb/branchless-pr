@@ -1,5 +1,5 @@
 // Package config implements INI-style configuration matching the Python
-// configparser semantics used by the original stack-pr (SPEC.md §7).
+// configparser semantics used by the original stack-pr (https://github.com/modular/stack-pr).
 package config
 
 import (
