@@ -1,3 +1,5 @@
+> **BLOCKED (2026-07-28):** Implementation paused. `gh pr merge --rebase --auto` on a stacked PR is documented as unsupported (auto-merge unavailable for stacked PRs, direct merges and merge queue both). Awaiting decision on: probe on preview-enabled repo / redesign without `--auto` / defer until GitHub ships auto-merge for stacks. See proposal.md for details.
+
 ## 1. Land Command — Native Whole-Stack Support
 
 - [ ] 1.1 Add `landWholeStackNative(app *AppContext, st stack.Stack) error` function in `internal/cli/land.go`: check `RebaseMergeAllowed`, check `MergeQueueEnabled`, fetch, queue tip PR via `pr.MergeRebaseAuto`, checkout original branch, print queued message. No `pr.EditBase` call.
