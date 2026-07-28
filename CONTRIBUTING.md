@@ -12,8 +12,8 @@ Thanks for your interest in `stack-pr`!
 - Fork the repo and open your PR against `main`.
 - Run `go vet ./...`, `gofmt -l .`, and `go test ./...` before pushing.
 - Keep changes focused — one feature or fix per PR.
-- Follow the algorithms in `SPEC.md`; if behavior should change, update the
-  spec in the same PR.
+- Follow the algorithms in `openspec/specs/`; if behavior should change, update the
+  relevant spec in the same PR.
 
 ## Style
 
