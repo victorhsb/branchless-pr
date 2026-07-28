@@ -4,7 +4,7 @@
 
 Go port of the Python `stack-pr` CLI (https://github.com/modular/stack-pr). Creates, updates, views, abandons, comments, checks, and lands stacked GitHub pull requests. A "stack" is the ordered list of commits in `BASE..HEAD`; each commit maps to exactly one PR, with the bottom PR targeting `main` and each higher PR targeting the generated branch of the commit below it.
 
-Behavioral specs live in `openspec/specs/`. If a port decision contradicts a spec, the spec wins — update both in the same PR if behavior must change. The upstream Python tool (https://github.com/modular/stack-pr) is the original reference.
+Behavioral specs live in `docs/specs/` (flattened, one file per area). If a port decision contradicts a spec, the spec wins — update both in the same PR if behavior must change. The upstream Python tool (https://github.com/modular/stack-pr) is the original reference.
 
 ## Build, test, lint
 
@@ -56,7 +56,7 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 
 ## Spec-driven workflow
 
-This repo uses OpenSpec (`openspec/`); behavioral specs live in `openspec/specs/`. New behavioral changes go through a change proposal in `openspec/changes/`. Use the `openspec-*` skills for the workflow (propose → continue → apply → verify → archive). When changing behavior, the corresponding `openspec/specs/` section must agree.
+Behavioral specs live in `docs/specs/`. New behavioral changes currently still go through a change proposal in `openspec/changes/` using the `openspec-*` skills (propose → continue → apply → verify → archive); this workflow is being replaced by the LocalSpec workflow (`docs/plans/localspec.md`). When changing behavior, the corresponding `docs/specs/` section must agree.
 
 ## Conventions
 
