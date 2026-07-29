@@ -57,6 +57,131 @@ If you are an LLM agent setting this tool up for a user:
 
 The `agent prompt` subcommand emits versioned, deterministic guidance covering each operation, safety model, and recovery procedures. The `agent diagnose` subcommand emits a read-only diagnostic report with a recommended next action.
 
+<details>
+<summary><strong>Agent setup and usage guide</strong> (click to expand)</summary>
+
+### Installation for agents
+
+Agents should install `branchless-pr` non-interactively:
+
+```bash
+# One-line installer (skips confirmation prompt)
+curl -fsSL https://raw.githubusercontent.com/victorhsb/branchless-pr/main/install.sh | sh -s -- -y
+
+# Or via Go
+go install github.com/victorhsb/branchless-pr/cmd/bpr@latest
+```
+
+Verify installation:
+
+```bash
+bpr --version
+bpr agent prompt overview
+```
+
+### Quick orientation
+
+Before performing any stack operations, gather context:
+
+```bash
+# View the current stack (read-only)
+bpr view
+
+# Get a diagnostic report with recommended next action
+bpr agent diagnose
+bpr agent diagnose --format json  # machine-readable output
+```
+
+### Common agent workflows
+
+**Inspecting a stack:**
+```bash
+bpr view                          # human-readable
+bpr view --format json            # machine-readable
+```
+
+**Previewing changes (no side effects):**
+```bash
+bpr submit --dry-run              # shows what would happen without mutating anything
+```
+
+**Submitting a stack:**
+```bash
+bpr submit                        # creates/updates PRs
+bpr submit --reviewer alice,bob   # add reviewers
+```
+
+**Checking CI status:**
+```bash
+bpr checks                        # human-readable
+bpr checks --format json          # machine-readable
+bpr checks --failed-only          # filter to failures only
+```
+
+**Collecting review feedback:**
+```bash
+bpr comments                      # human-readable
+bpr comments --format json        # machine-readable
+bpr comments --unresolved-only    # filter to unresolved items
+```
+
+**Landing the bottom PR:**
+```bash
+bpr land                          # squash-merge bottom PR, rebase the rest
+```
+
+**Cleaning up:**
+```bash
+bpr abandon                       # strip stack metadata, delete generated branches
+```
+
+### Safety model
+
+- `--dry-run` performs **no local Git mutations**, **no remote pushes**, and **no GitHub PR writes**. Use it to preview changes safely.
+- `bpr agent diagnose` is read-only and safe to run at any time.
+- `bpr view` is read-only and safe to run at any time.
+- Mutating commands (`submit`, `land`, `abandon`) should be preceded by `bpr view` and `bpr agent diagnose`.
+
+### Configuration for agents
+
+Agents can scaffold a config file:
+
+```bash
+bpr config init
+```
+
+Or set individual values:
+
+```bash
+bpr config set common.draft=true
+bpr config set repo.reviewer=octocat
+```
+
+See the full [Configuration](#configuration) section for all options.
+
+### Machine-readable output
+
+All major commands support `--format json` for agent consumption:
+
+| Command | JSON flag |
+| ------- | --------- |
+| `bpr view` | `--format json` |
+| `bpr comments` | `--format json` |
+| `bpr checks` | `--format json` |
+| `bpr agent diagnose` | `--format json` |
+
+### Getting help
+
+```bash
+bpr agent prompt                  # full agent guidance (all topics)
+bpr agent prompt submit           # topic-specific guidance
+bpr agent prompt recovery         # recovery procedures
+bpr --help                        # general help
+bpr <command> --help              # command-specific help
+```
+
+</details>
+
 ## Quick start
 
 > All examples use `bpr` (the primary executable name). `bpr` and the historical `stack-pr` symlink are interchangeable.
