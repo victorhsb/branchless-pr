@@ -151,8 +151,9 @@ docs/
 - [x] Remove or deprecate openspec-* skills (deleted, along with the `.opencode/commands/opsx-*` slash commands that invoked them)
 
 ### Phase 3: Cleanup
-- [ ] Delete `openspec/` directory entirely (including changes/)
-- [ ] Update AGENTS.md architecture section
+- [x] Delete `openspec/` directory entirely (including changes/)
+- [x] Update AGENTS.md architecture section
+- [x] Remove leftover `openspec-*` skill copies and `/opsx-*` workflow files (`.pi/skills/`, `.codex/skills/`, `.agent/workflows/`)
 
 ## Format Specifications
 
@@ -252,11 +253,11 @@ Tier selection rules:
 
 ## Success Criteria
 
-- [ ] AGENTS.md points to `docs/specs/` not `openspec/`
-- [ ] `plan` skill creates valid plan files
-- [ ] `document` skill deletes plans and updates specs
-- [ ] No references to `openspec` in codebase (except git history)
-- [ ] New workflow documented in AGENTS.md
+- [x] AGENTS.md points to `docs/specs/` not `openspec/`
+- [x] `plan` skill creates valid plan files
+- [x] `document` skill deletes plans and updates specs
+- [x] No references to `openspec` in codebase (except git history)
+- [x] New workflow documented in AGENTS.md
 
 ## Decisions Log
 

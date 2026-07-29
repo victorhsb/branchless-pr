@@ -56,7 +56,11 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 
 ## Spec-driven workflow
 
-Behavioral specs live in `docs/specs/`. Behavioral changes go through the LocalSpec workflow: the `plan` skill writes a single-file plan to `docs/plans/<name>.md`, implementation updates code and specs together, and the `document` skill finalizes (verifies specs, prompts for ADRs in `docs/adr/`, deletes the plan). When changing behavior, the corresponding `docs/specs/` section must agree. The old OpenSpec workflow (`openspec/`) is being removed; see `docs/plans/localspec.md`.
+Behavioral specs live in `docs/specs/`. Behavioral changes go through the LocalSpec workflow: the `plan` skill writes a single-file plan to `docs/plans/<name>.md`, implementation updates code and specs together, and the `document` skill finalizes (verifies specs, prompts for ADRs in `docs/adr/`, deletes the plan). When changing behavior, the corresponding `docs/specs/` section must agree.
+
+- **Specs** (`docs/specs/`): Flattened current behavioral contracts, one file per area. Read by agents before touching code.
+- **Plans** (`docs/plans/`): Active implementation work; single file per plan with frontmatter and task checklist. Ephemeral — deleted after completion.
+- **ADRs** (`docs/adr/`): Architecture Decision Records for constraints and "why we can't do X"; managed via `adrm`, sequential from 0001.
 
 ## Conventions
 
