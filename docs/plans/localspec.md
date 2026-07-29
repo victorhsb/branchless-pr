@@ -270,7 +270,8 @@ Tier selection rules:
 - **2026-07-28**: openspec-* skills deleted outright (not deprecated); the `/opsx-*` slash commands that invoked them were deleted too. Git history preserves both.
 - **2026-07-28**: Plan files are named `docs/plans/<name>.md` (no date prefix; the date lives in frontmatter).
 - **2026-07-28**: `document` skill validates specs via agent judgment, not scripted diffing.
+- **2026-07-28**: Pre-deletion audit confirmed all 5 unarchived `openspec/changes/` were absorbed into `docs/specs/` (one was BLOCKED/never implemented — `native-stack-whole-stack-land`). The audit surfaced one real gap: the land append-classification (partial membership) refusal was shipped but unspec'd; added as a row to the `docs/specs/land.md` native safety-gate table.
 
 ## Next Steps
 
-Phase 3 (Cleanup): delete `openspec/` entirely (including `changes/`), then finish the AGENTS.md workflow section so it describes only the LocalSpec workflow.
+Migration complete. Finalize this plan with the `document` skill (it will delete this file; git history preserves it).

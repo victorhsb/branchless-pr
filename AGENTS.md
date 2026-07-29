@@ -66,5 +66,5 @@ Behavioral specs live in `docs/specs/`. Behavioral changes go through the LocalS
 
 - Errors propagate via explicit returns; no panics for control flow.
 - Table-driven tests are the norm; see `internal/cli/*_test.go` and `internal/stack/entry_test.go`.
-- `CHANGELOG.md` documents user-facing shipped behavior only — keep OpenSpec workflow bookkeeping out of it.
+- `CHANGELOG.md` documents user-facing shipped behavior only — keep workflow bookkeeping out of it.
 - Don't add a Go GitHub SDK dependency; don't bypass `internal/shell`.
