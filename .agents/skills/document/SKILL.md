@@ -1,6 +1,6 @@
 ---
 name: document
-description: Finalize a completed implementation plan — verify specs in docs/specs/ reflect the shipped behavior, prompt for an ADR if an architectural decision emerged, update AGENTS.md if needed, and delete the plan file. Use when the user says work on a plan is done, asks to "document", "finalize", or "close out" a plan. Replaces the old openspec verify/archive workflow.
+description: Finalize a completed implementation plan — verify specs in docs/specs/ reflect the shipped behavior, prompt for an ADR if an architectural decision emerged, update AGENTS.md if needed, and delete the plan file. Use when the user says work on a plan is done, asks to "document", "finalize", or "close out" a plan.
 ---
 
 # Document

@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Create a structured implementation plan for a behavioral change to this repository. Use when the user describes a feature, fix, or behavior change they want to build, asks to "plan this", or is about to start non-trivial work that will touch behavior documented in docs/specs/. Replaces the old openspec-propose workflow.
+description: Create a structured implementation plan for a behavioral change to this repository. Use when the user describes a feature, fix, or behavior change they want to build, asks to "plan this", or is about to start non-trivial work that will touch behavior documented in docs/specs/.
 ---
 
 # Plan
@@ -57,7 +57,7 @@ Create a single-file implementation plan in `docs/plans/<name>.md`.
 
 ## Guardrails
 
-- One file only. Do not create proposal/design/tasks splits or delta spec directories — that was the OpenSpec workflow and it is gone.
+- One file only. Do not create proposal/design/tasks splits or delta spec directories.
 - Do not implement anything; this skill ends at a written plan.
 - Keep the plan proportional: a small fix gets a short plan. Do not pad sections.
 - Plans are ephemeral scratchpads. They get deleted by the `document` skill when the work is done, so don't put anything in a plan that belongs permanently in a spec or ADR.
