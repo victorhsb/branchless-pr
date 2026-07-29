@@ -271,6 +271,7 @@ Tier selection rules:
 - **2026-07-28**: Plan files are named `docs/plans/<name>.md` (no date prefix; the date lives in frontmatter).
 - **2026-07-28**: `document` skill validates specs via agent judgment, not scripted diffing.
 - **2026-07-28**: Pre-deletion audit confirmed all 5 unarchived `openspec/changes/` were absorbed into `docs/specs/` (one was BLOCKED/never implemented — `native-stack-whole-stack-land`). The audit surfaced one real gap: the land append-classification (partial membership) refusal was shipped but unspec'd; added as a row to the `docs/specs/land.md` native safety-gate table.
+- **2026-07-29**: Finalization sweep deleted the leftover tool-specific openspec skill copies in `.claude/skills/`, `.codex/skills/`, `.agent/skills/`, and the `.agent/workflows/opsx-*` commands, and scrubbed openspec mentions from the `plan`/`document` skill descriptions. LocalSpec is process, not product behavior — it earns no entry in `docs/specs/` and no ADR.
 
 ## Next Steps
 
