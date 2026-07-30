@@ -58,8 +58,18 @@ Without `--format`, output is ANSI-colored, Markdown-compatible text with termin
 | `pr_number` | pull request number, `0` if none |
 | `head_branch` | branch name for this stack entry |
 | `base_branch` | base branch for this stack entry |
+| `github_stack_number` | repository-scoped native Stack number, `null` when unavailable |
+| `github_stack_position` | 1-based bottom-to-top position within the native Stack, `null` when unavailable |
+| `github_stack_size` | native Stack size, `null` when unavailable |
+| `github_stack_base` | ultimate native Stack base ref, `null` when unavailable |
 
 - `--format` with a value other than `text` or `json` → exit with a clear error message.
+
+#### Native stack fields in JSON
+
+- Native integration enabled and entry belongs to a GitHub Stack → `github_stack_number` is the repository-scoped Stack number, `github_stack_position` is the 1-based bottom-to-top position, `github_stack_size` is the Stack size, and `github_stack_base` is the ultimate Stack base ref.
+- Native integration enabled and entry's PR is unstacked or membership is unavailable in `auto` mode → every `github_stack_*` field is `null`.
+- `github.native_stacks = off` → every `github_stack_*` field is `null`; no native membership query occurs.
 
 ### Post-view tips
 

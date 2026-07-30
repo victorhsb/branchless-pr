@@ -9,7 +9,7 @@ status: stable
 
 Commands that mutate repository state detect active Git operations before acting. Operation-state paths are resolved by asking Git for the repository context rather than assuming metadata lives in a `.git` directory, so rebase, merge, cherry-pick, and sequencer state is detected correctly from repository subdirectories, linked worktrees, submodules, and repositories with a separate Git directory.
 
-This is an explicit Go-port safety decision that differs from the literal `.git` path checks documented for Python `stack-pr` in `SPEC.md` section 11.
+This is an explicit Go-port safety decision that differs from the literal `.git` path checks documented for Python `stack-pr` in `SPEC.md` section 11; the rationale is recorded in [ADR-0005](../adr/0005-resolve-git-operation-state-through-repository-context.md).
 
 ## Behavior
 

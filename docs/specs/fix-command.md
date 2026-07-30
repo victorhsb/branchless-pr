@@ -47,10 +47,7 @@ Only the current local `HEAD` commit message is repaired.
 
 ### Dry-run
 
-`--dry-run` reports the planned repair without mutating local Git or GitHub state.
-
-- `bpr fix --pr <number> --dry-run` → load the selected PR and inspect `HEAD`; print the PR URL, PR head branch, local `HEAD` SHA, existing metadata state, and the metadata line it would add or replace; state that no commit was changed.
-- `bpr fix --pr <number> --dry-run` → does not amend `HEAD`, does not push to any remote, and does not write to GitHub.
+`bpr fix --pr <number> --dry-run` reports the planned repair without mutating local Git or GitHub state: it prints the PR URL, PR head branch, local `HEAD` SHA, existing metadata state, and the metadata line it would add or replace, and states that no commit was changed. The full dry-run contract is specified in [Dry-run](dry-run.md).
 
 ### Advisory stack readiness
 
@@ -59,4 +56,3 @@ After planning or applying a fix, advisory warnings report whether the stack app
 - Advisory stack inspection succeeds and one or more discovered stack entries are missing PR metadata → print a warning that the stack is not fully ready to submit, including the count of entries missing PR metadata.
 - Advisory stack inspection finds malformed PR metadata → print a warning that the stack has malformed PR metadata; the warning does not cause a successful local repair to fail.
 - Advisory stack inspection fails → print a warning explaining that stack readiness could not be determined; the warning does not cause a successful local repair to fail.
-- `bpr fix --pr <number> --dry-run` → run the same read-only advisory stack-readiness inspection; warnings are phrased as dry-run diagnostics.

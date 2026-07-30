@@ -1,15 +1,39 @@
 ---
-title: Export dry-run
+title: Dry-run
 status: stable
 ---
 
-# Export dry-run
+# Dry-run
 
 ## Overview
 
-`stack-pr submit` and its `export` alias support a `--dry-run` flag that previews submit/export actions without changing local Git state or GitHub state.
+Several `stack-pr` commands support a `--dry-run` flag that previews the actions the command would perform without applying them. Dry-run is currently supported by `submit` (and its `export` alias) and by `fix`. Commands without a documented dry-run mode (such as `land` and `abandon`) do not accept `--dry-run`.
 
-## Behavior
+## Shared dry-run contract
+
+These guarantees apply to every command's dry-run mode.
+
+### Mutation safety
+
+Dry-run performs no local Git mutations, no remote pushes, and no GitHub write operations.
+
+- Dry-run invoked → does not checkout generated branches, rebase branches, amend commits, create or delete local generated branches, save a stash, or pop a stash.
+- Dry-run invoked → does not push any branch to any remote.
+- Dry-run invoked → does not create PRs, edit PR title/body/base fields, change PR draft/ready state, merge, or close PRs.
+
+### Plan output
+
+- Dry-run completes successfully → output clearly states that no local Git changes, remote pushes, or GitHub changes were made.
+
+### Validation
+
+Dry-run validates the same inputs and planning decisions that can be checked without mutation, and fails the same validation errors as the corresponding real execution.
+
+### Non-dry-run behavior preservation
+
+- Invoked without `--dry-run` → perform the command's full documented mutations as specified in the command's own spec.
+
+## Submit/export dry-run
 
 ### Flag acceptance
 
@@ -25,26 +49,16 @@ Dry-run prints a human-readable plan describing the submit/export actions that w
 - Empty stack → output reports that the stack is empty and reports success without attempting any mutation.
 - Dry-run completes successfully → output clearly states that no local Git changes, remote pushes, or GitHub PR changes were made.
 
-### Mutation safety
-
-Dry-run performs no local Git mutations, no remote pushes, and no GitHub write operations.
-
-- Dry-run invoked → does not checkout generated branches, rebase branches, amend commits, create or delete local generated branches, save a stash, or pop a stash.
-- Dry-run invoked → does not push generated head branches or amended branches to any remote.
-- Dry-run invoked → does not create PRs, edit PR title/body/base fields, or change PR draft/ready state.
-
 ### Validation
-
-Dry-run validates the same submit/export inputs and planning decisions that can be checked without mutation.
 
 - `--draft-bitmask` length does not match the stack length, or its characters are not `0` or `1` → report the same validation error as real submit/export.
 - Non-empty stack → generated head branches are computed from the configured branch-name template; base branches are computed using the same bottom-to-top stacking rules as real submit/export.
 - Tracked files have staged or unstaged changes → fail the existing clean-repository check; changes are not stashed automatically.
+- Dry-run planning uses the same submit/export engine selection rule as the corresponding non-dry-run command (see the experimental submit engine gate in [Submit/Export](submit-export.md)); dry-run remains free of local Git mutations, remote pushes, and GitHub PR writes.
 
-### Non-dry-run behavior preservation
+### Receipts unavailable
 
-- `stack-pr submit` without `--dry-run` → continues to create/update PRs, push branches, update metadata, and perform cleanup according to existing submit/export behavior.
-- `stack-pr export` without `--dry-run` → continues to behave as the submit alias according to existing submit/export behavior.
+- `--dry-run` and `--receipt <destination>` (other than `off`) are both provided → report an invocation error explaining that operation receipts are only available for real submit/export executions, and perform no mutations. (See [Submit/Export](submit-export.md), "Operation receipts".)
 
 ### Native stack dry-run plan
 
@@ -55,3 +69,11 @@ Dry-run describes native Stack reconciliation without performing a GitHub write.
 - `github.native_stacks = off` → plan reports native integration as disabled or omits the native action consistently; no native Stacks endpoint is called.
 - Any native mode → does not invoke REST create, append, or unstack operations, and preserves all existing local Git, remote push, and PR no-mutation guarantees.
 - Native integration enabled and dry-run needs existing membership to classify a plan → may perform read-only GitHub API calls; those calls do not modify PR or Stack state.
+
+## Fix dry-run
+
+`--dry-run` reports the planned repair without mutating local Git or GitHub state.
+
+- `bpr fix --pr <number> --dry-run` → load the selected PR and inspect `HEAD`; print the PR URL, PR head branch, local `HEAD` SHA, existing metadata state, and the metadata line it would add or replace; state that no commit was changed.
+- `bpr fix --pr <number> --dry-run` → does not amend `HEAD`, does not push to any remote, and does not write to GitHub.
+- `bpr fix --pr <number> --dry-run` → run the same read-only advisory stack-readiness inspection as a real fix (see [Fix](fix-command.md), "Advisory stack readiness"); warnings are phrased as dry-run diagnostics.

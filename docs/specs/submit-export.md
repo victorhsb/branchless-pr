@@ -167,21 +167,16 @@ Required native integration fails before submit-specific mutation when repositor
 
 ### Dry-run behavior
 
-Dry-run mode previews actions without any mutation.
-
-- `--dry-run` is invoked with otherwise valid options → execute dry-run behavior instead of real submit/export behavior.
-- Dry-run is invoked for a non-empty stack → output includes each stack entry in stack order showing commit title, generated head branch, computed base branch, and whether the PR would be created or updated; entries for new PRs show the draft state that would be used; entries requiring metadata indicate metadata would be added.
-- Dry-run is invoked for an empty stack → output reports that the stack is empty.
-- Dry-run completes successfully → output clearly states that no local Git changes, remote pushes, or GitHub PR changes were made.
-- Dry-run never checks out generated branches, rebases, amends commits, creates or deletes local branches, or saves or pops a stash; never pushes branches to the remote; never creates or edits PRs or changes draft state.
-- Dry-run validates the draft bitmask and computes head/base branches using the same rules as real submit/export; it fails the clean-repository check if tracked files have changes and does not auto-stash changes.
-- Invoked without `--dry-run` → perform full submit/export mutations as specified.
+`stack-pr submit --dry-run` and `stack-pr export --dry-run` preview submit/export actions without any local Git mutation, remote push, or GitHub write. The full dry-run contract — shared guarantees, plan output, validation, receipt unavailability, and the native stack dry-run plan — is specified in [Dry-run](dry-run.md).
 
 ### Operation receipts
 
-Submit/export supports opt-in machine-readable receipts for real executions.
+Submit/export supports opt-in machine-readable receipts for real executions. Each receipt is a single JSON object with a stable, versioned schema so callers can inspect completed side effects, failures, and recovery attempts.
 
-- `--receipt <destination>` is invoked without `--dry-run` → attempt to emit a submit operation receipt.
+#### Receipt request and configuration
+
+- `stack-pr submit --receipt <destination>` is invoked without `--dry-run` → attempt to emit a submit operation receipt to `<destination>`.
+- `stack-pr export --receipt <destination>` is invoked without `--dry-run` → emit the same submit operation receipt as `stack-pr submit --receipt <destination>`.
 - No receipt flag and no receipt configuration → emit no receipt; existing human output remains unchanged.
 
 | Receipt destination | Behavior |
@@ -191,7 +186,10 @@ Submit/export supports opt-in machine-readable receipts for real executions.
 | any other value | interpret as a filesystem path |
 
 - `--dry-run` and `--receipt <destination>` (other than `off`) are both provided → report an invocation error explaining receipts are only available for real executions, and perform no mutations.
-- `.stack-pr.cfg` contains `receipt.submit = <destination>` → use that destination unless `--receipt` overrides it; the default when omitted is `off`.
+- `.stack-pr.cfg` contains `receipt.submit = <destination>` → use that destination for both `submit` and `export` unless `--receipt` overrides it; the default when omitted is `off`.
+
+#### Receipt JSON envelope
+
 - A receipt is a single JSON object with fields:
 
 | Field | Content |
@@ -204,11 +202,43 @@ Submit/export supports opt-in machine-readable receipts for real executions.
 | `stack` | size, per-entry commit SHA, title, head branch, base branch, PR URL when known |
 | `operations` | array of operation entries |
 
+- A receipt is emitted after stack discovery succeeds → `stack` includes the stack size and per-entry data as described above.
+- The effective receipt destination is `-` → standard output contains exactly one valid JSON receipt document; human progress output is not interleaved into standard output.
+
+#### Receipt operation entries
+
+The receipt records high-value submit/export side effects in execution order.
+
 - Side-effecting operation completes successfully → append an entry with `type`, `status: ok`, and operation-specific details.
 - Side-effecting operation fails after receipt collection begins → append or update an entry with `status: failed` and an error message.
 - At least one operation succeeds followed by a failed operation → top-level `status` is `partial_failure`.
+- Submit/export fails before any side-effect operation succeeds and a receipt can be emitted → top-level `status` is `failed`.
 - Submit/export completes successfully → top-level `status` is `ok`.
-- Branch, push, PR, metadata, or cleanup operations occur → record entries identifying the affected branches, remotes, PRs, commits, or error messages.
-- Submit/export fails and recovery attempts original-branch checkout or stash pop → record recovery operation entries with success or failure status.
+- Generated stack branches are created or checked out → record branch operation entries identifying the affected branch names and commits when available.
+- Generated stack branches are force-pushed → record push operation entries identifying the remote and branch names.
+- A pull request is created or updated → record pull request operation entries identifying the commit, head branch, base branch, title, and PR URL when available.
+- Commits are amended to add `stack-info` metadata → record metadata operation entries identifying the affected head branch and commit when available.
+- A best-effort cleanup operation fails without failing the command → record a warning operation entry identifying the cleanup operation and error message.
+
+#### Recovery recording
+
+- Submit/export fails and recovery attempts original-branch checkout → record a recovery operation entry with the target original branch and success or failure status.
+- Submit/export fails after an auto-stash was created and recovery attempts to pop the stash → record a recovery operation entry with success or failure status.
+
+#### Receipt emission failure
+
 - Effective receipt destination is a filesystem path and writing fails → return a non-zero error explaining receipt emission failed.
 - Effective receipt destination is `off` → never attempt to write a receipt.
+
+#### Native Stack receipt operations
+
+When native integration is enabled, receipts record the outcome of native Stack planning and reconciliation. All rows below assume receipt emission is enabled.
+
+| Native reconciliation outcome | Receipt content |
+|-------------------------------|-----------------|
+| Submit/export creates a GitHub native Stack | `ok` operation containing the action `create`, Stack number, and ordered PR numbers |
+| Submit/export appends PRs to a GitHub native Stack | `ok` operation containing the action `append`, Stack number, and appended PR numbers |
+| Native reconciliation is a no-op | `ok` operation containing the action `noop` and Stack number |
+
+- Auto mode falls back because native Stacks is unavailable or the stack is ineligible and submit/export completes through the legacy path → record the fallback reason.
+- Native classification or mutation fails after earlier submit operations succeeded → include a failed native Stack operation, and the top-level receipt status is `partial_failure`.
