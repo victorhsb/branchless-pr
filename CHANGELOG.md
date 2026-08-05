@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed `submit`/`export` aborting with "missing stack membership field" when
+  `github.native_stacks = auto` and the stack contains a PR created before the
+  native Stacks integration. A pull-request resource that omits the `stack`
+  field is now classified as unstacked (exactly like `stack: null`), and the
+  resulting native Stack create or append backfills the legacy PR's membership.
+
 ## v1.11.0 - 2026-07-25
 
 - Added GitHub native Stacked PR integration via the `github.native_stacks`

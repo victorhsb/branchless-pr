@@ -150,6 +150,29 @@ func TestNativeSubmitPreflightModesAndProspectiveActions(t *testing.T) {
 			t.Fatalf("result = %+v", result)
 		}
 	})
+
+	t.Run("legacy PRs without membership plan create instead of failing", func(t *testing.T) {
+		// Pre-native-stacks PRs carry no stack membership field server-side;
+		// LoadState reports them as unstacked and auto mode must backfill them
+		// through a create rather than aborting.
+		client := &fakeNativeSubmitClient{
+			memberships: map[int]*nativestacks.Membership{
+				10: {PRNumber: 10},
+				20: {PRNumber: 20},
+			},
+			stacks: nativestacks.StackSet{},
+		}
+		result, err := nativeSubmitPreflightWithClient(stackForNativeLandRefusalTest(), config.NativeStacksAuto, client, "octocat", "hello-world")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.enabled || result.plan.Kind != nativestacks.ActionCreate {
+			t.Fatalf("result = %+v", result)
+		}
+		if !reflect.DeepEqual(result.plan.LocalPRs, []int{10, 20}) {
+			t.Fatalf("plan.LocalPRs = %v, want [10 20]", result.plan.LocalPRs)
+		}
+	})
 }
 
 func twoEntryNativeStack(bottomHasPR bool) stack.Stack {

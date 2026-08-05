@@ -164,6 +164,7 @@ Required native integration fails before submit-specific mutation when repositor
 - `github.native_stacks = required` and GitHub native Stacks is unavailable for the repository → fail before generated branch creation, commit amendment, remote push, PR mutation, or native Stack mutation.
 - `github.native_stacks = auto` and GitHub native Stacks is unavailable for the repository → warn once and execute the legacy submit/export algorithm without native reconciliation.
 - GitHub native Stacks is available and the final PR chain is eligible for create or append → proceed using `gh api`; never inspect, require, install, or upgrade the `github/gh-stack` extension.
+- A local PR predates the native Stacks integration and its pull-request resource omits the `stack` membership field → classify the PR as unstacked (exactly like `stack: null`); the resulting create or append backfills its native membership, in both `auto` and `required` modes. Never fail submit/export solely because the membership field is absent.
 
 ### Dry-run behavior
 

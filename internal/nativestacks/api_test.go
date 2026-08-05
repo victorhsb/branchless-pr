@@ -148,6 +148,59 @@ func TestRESTModelsDecodePublishedShapesAndUnknownFields(t *testing.T) {
 	}
 }
 
+func TestPullRequestWithoutStackFieldIsUnstacked(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "stack field absent (pre-native-stacks PR)",
+			body: strings.Replace(prFixture(10, "main", "null"), "\n\t\t\"stack\": null,", "", 1),
+		},
+		{
+			name: "stack field null",
+			body: prFixture(10, "main", "null"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var pr PullRequest
+			if err := json.Unmarshal([]byte(tc.body), &pr); err != nil {
+				t.Fatal(err)
+			}
+			if err := pr.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want unstacked PR to validate", err)
+			}
+			if pr.Stack != nil {
+				t.Fatalf("Stack = %+v, want nil", pr.Stack)
+			}
+		})
+	}
+
+	t.Run("present but invalid membership still errors", func(t *testing.T) {
+		var pr PullRequest
+		if err := json.Unmarshal([]byte(prFixture(10, "main", membershipFixture(7, 2, 3))), &pr); err != nil {
+			t.Fatal(err)
+		}
+		if err := pr.Validate(); err == nil {
+			t.Fatal("expected impossible position error")
+		}
+	})
+
+	t.Run("other required fields still enforced when absent", func(t *testing.T) {
+		for _, field := range []string{`"state": "open",`, `"merged_at": null,`} {
+			body := strings.Replace(prFixture(10, "main", "null"), field, "", 1)
+			var pr PullRequest
+			if err := json.Unmarshal([]byte(body), &pr); err != nil {
+				t.Fatal(err)
+			}
+			if err := pr.Validate(); err == nil {
+				t.Fatalf("expected validation error for missing %s", field)
+			}
+		}
+	})
+}
+
 func TestRESTModelsRejectMalformedAmbiguousAndDuplicateData(t *testing.T) {
 	cases := []struct {
 		name string

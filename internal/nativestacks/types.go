@@ -64,12 +64,13 @@ type PullRequest struct {
 	AutoMerge       json.RawMessage  `json:"auto_merge"`
 	MergeQueueEntry json.RawMessage  `json:"merge_queue_entry"`
 
-	stackPresent    bool
 	mergedAtPresent bool
 }
 
 // UnmarshalJSON records presence for nullable fields that are required by the
-// preview contract.
+// preview contract. The stack field is deliberately not presence-checked: a
+// pull request predating the native Stacks feature omits it entirely, and an
+// absent stack field is classified as unstacked exactly like "stack": null.
 func (p *PullRequest) UnmarshalJSON(data []byte) error {
 	type alias PullRequest
 	var raw map[string]json.RawMessage
@@ -81,7 +82,6 @@ func (p *PullRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*p = PullRequest(decoded)
-	_, p.stackPresent = raw["stack"]
 	_, p.mergedAtPresent = raw["merged_at"]
 	return nil
 }
@@ -181,9 +181,6 @@ func (p *PullRequest) Validate() error {
 	}
 	if p.Base.Ref == "" || p.Base.SHA == "" {
 		return fmt.Errorf("pull request #%d is missing base ref or sha", p.Number)
-	}
-	if !p.stackPresent {
-		return fmt.Errorf("pull request #%d is missing stack membership field", p.Number)
 	}
 	if p.Stack != nil {
 		if err := p.Stack.Validate(p.Number); err != nil {

@@ -94,10 +94,10 @@ Native Stack integration is an explicit Go-port extension to the base behavior d
 The published pull-request membership and Stack resource schemas are decoded and validated (implemented in `internal/nativestacks`; see `REST_ACCEPTANCE_TEST_MATRIX.md` for acceptance evidence).
 
 - Pull-request resource contains `stack.id`, `stack.number`, `stack.size`, `stack.position`, `stack.base.ref`, and `stack.base.sha` → preserve the global ID and repository-scoped Stack number as distinct values, interpret position as 1-based bottom-to-top order, and distinguish the PR's direct `base.ref` from the Stack's ultimate `stack.base.ref`.
-- Pull-request resource contains `stack: null` → classify the PR as unstacked.
+- Pull-request resource contains `stack: null` or omits the `stack` field entirely (for example a PR created before the native Stacks integration) → classify the PR as unstacked; reconciliation then backfills membership through the normal create or append path.
 - Stack resource contains `id`, `number`, `node_id`, `url`, `base.ref`, `open`, `created_at`, and `pull_requests` → preserve the `pull_requests` array in returned bottom-to-top order; each member decodes `number`, `state`, `draft`, nullable `merged_at`, `head.ref`, and `head.sha`; do not require `base.sha` on the Stack resource.
 - Membership or Stack response contains additional preview fields → ignore the unknown fields and continue to validate every documented required field.
-- Response omits a required field, contains an impossible membership position, contains duplicate PR numbers, or cannot be decoded → return a schema error; perform no native Stack write based on that response.
+- Response omits a required field other than the pull-request `stack` membership field, contains an impossible membership position, contains duplicate PR numbers, or cannot be decoded → return a schema error; perform no native Stack write based on that response.
 - Stack member has `state: "closed"` → `merged_at != null` classifies the member as merged; `merged_at == null` classifies the member as closed but unmerged.
 
 ### REST read contract
