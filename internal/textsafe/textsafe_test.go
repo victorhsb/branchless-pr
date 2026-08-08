@@ -9,7 +9,9 @@ func TestString(t *testing.T) {
 		want string
 	}{
 		{"plain", "looks fine", "looks fine"},
-		{"keeps newlines and tabs", "a\nb\tc\r\nd", "a\nb\tc\r\nd"},
+		{"keeps newlines and tabs", "a\nb\tc\nd", "a\nb\tc\nd"},
+		{"crlf normalizes to lf", "a\r\nb", "a\nb"},
+		{"strips bare cr used to overwrite a line", "pending\rAll checks passed", "pendingAll checks passed"},
 		{"keeps non-ascii", "café — ✅ 日本語", "café — ✅ 日本語"},
 
 		{
@@ -48,7 +50,7 @@ func TestStringLeavesNoEscapeIntroducer(t *testing.T) {
 	payload := "\x1b[31mred\x1b[0m\x1b]0;title\x072K"
 	got := String(payload)
 	for _, r := range got {
-		if r == 0x1b || r == 0x9b || r == 0x9d || r == 0x07 {
+		if r == 0x1b || r == 0x9b || r == 0x9d || r == 0x07 || r == '\r' {
 			t.Fatalf("String(%q) = %q still contains an escape introducer %U", payload, got, r)
 		}
 	}

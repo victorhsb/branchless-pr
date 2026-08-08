@@ -383,7 +383,7 @@ func writeTestFile(t *testing.T, dir, name, body string) {
 // A GitHub-authored comment body must not be able to emit terminal escape
 // sequences in the default text output.
 func TestWriteCommentsReportTextStripsControlCharacters(t *testing.T) {
-	const payload = "\x1b[2J\x1b[H\x1b]0;pwned\x07LGTM \x1b[32mapproved\x1b[0m"
+	const payload = "\x1b[2J\x1b[H\x1b]0;pwned\x07pending\rLGTM \x1b[32mapproved\x1b[0m"
 	report := &commentsReport{
 		SchemaVersion: "1",
 		Command:       "stack-pr comments",
@@ -407,7 +407,7 @@ func TestWriteCommentsReportTextStripsControlCharacters(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := out.String()
-	for _, bad := range []string{"\x1b", "\x07", "\x9b", "\x00"} {
+	for _, bad := range []string{"\x1b", "\x07", "\x9b", "\x00", "\r"} {
 		if strings.Contains(text, bad) {
 			t.Fatalf("text output retained control character %q:\n%q", bad, text)
 		}
