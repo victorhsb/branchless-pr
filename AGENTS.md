@@ -61,7 +61,7 @@ Behavioral specs live in `docs/specs/`. Behavioral changes go through the LocalS
 
 - **Specs** (`docs/specs/`): Flattened current behavioral contracts, one file per area. Read by agents before touching code.
 - **Plans** (`docs/plans/`): Active implementation work; single file per plan with frontmatter and task checklist. Ephemeral — deleted after completion.
-- **ADRs** (`docs/adr/`): Architecture Decision Records for constraints and "why we can't do X"; managed via `adrm`, sequential from 0001.
+- **ADRs** (`docs/adr/`): Architecture Decision Records for constraints and "why we can't do X"; managed via `canon`, sequential from 0001.
 
 ## Conventions
 

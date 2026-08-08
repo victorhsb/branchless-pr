@@ -21,8 +21,14 @@ Generated branch names must map uniquely to stack entries. A template without th
 
 ## Decision
 
-The branch name template must contain $ID (or gain it implicitly via a /$ID suffix). Validation happens in cli/root.go PersistentPreRunE before any mutation.
+The branch name template must always yield an $ID component. A template that omits $ID gains an implicit /$ID suffix in stack.ParseTemplate; there is no rejection path, so any non-empty template is usable.
 
 ## Consequences
 
-Invalid templates fail fast at pre-run with a clear error instead of colliding mid-stack. Template variables are documented in the config spec.
+Collisions are prevented by construction rather than by pre-run validation errors. The empty template is the only invalid case, and it is reported by `agent diagnose` rather than enforced at pre-run. Template variables are documented in the config spec.
+
+## Appendix: 2026-08-08 correction
+
+Date: 2026-08-08
+
+Decision and Consequences rewritten to match the implementation: stack.ParseTemplate appends /$ID implicitly and there is no pre-run validation or rejection path. The previous text described fail-fast validation in PersistentPreRunE, which does not exist.

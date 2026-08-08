@@ -21,8 +21,14 @@ Ad-hoc os/exec call sites scattered across packages would make subprocess behavi
 
 ## Decision
 
-internal/shell is the only package permitted to invoke subprocesses. No package outside internal/shell may call os/exec directly; all git and gh invocations flow through typed wrappers in internal/git and internal/pr.
+internal/shell is the only package permitted to spawn subprocesses. No production code outside internal/shell may call exec.Command or equivalents; all git and gh invocations flow through typed wrappers in internal/git and internal/pr. Non-spawning uses of os/exec (such as exec.LookPath for PATH checks) are exempt, and _test.go helpers may invoke git directly to build fixture repositories.
 
 ## Consequences
 
-There is a single boundary for stubbing subprocesses in tests and for auditing side effects. CONTRIBUTING.md codifies the rule.
+There is a single boundary for stubbing subprocesses in tests and for auditing side effects. CONTRIBUTING.md codifies the rule with a documented-exception clause.
+
+## Appendix: 2026-08-08 correction
+
+Date: 2026-08-08
+
+Decision reworded to match the enforced rule: the ban covers spawning subprocesses (exec.Command) in production code; exec.LookPath and _test.go fixture helpers are exempt. The previous absolute phrasing (no os/exec use at all) did not match the codebase.
