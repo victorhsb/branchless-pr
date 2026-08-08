@@ -1,6 +1,7 @@
 package comments
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 	"github.com/victorhsb/branchless-pr/internal/stackstate"
+	"github.com/victorhsb/branchless-pr/internal/textsafe"
 )
 
 type AppContext = invocation.AppContext
@@ -345,8 +347,13 @@ func isUnresolvedOrAttentionRequired(item pr.CommentItem) bool {
 func Write(w io.Writer, report *commentsReport, format string) error {
 	switch format {
 	case "text":
-		writeCommentsText(w, report)
-		return nil
+		// Render first, then strip control characters, so GitHub-authored
+		// bodies cannot emit terminal escape sequences. JSON output needs no
+		// such pass because encoding/json escapes control characters.
+		var buf bytes.Buffer
+		writeCommentsText(&buf, report)
+		_, err := io.WriteString(w, textsafe.String(buf.String()))
+		return err
 	case "json":
 		payload, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {

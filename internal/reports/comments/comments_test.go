@@ -379,3 +379,41 @@ func writeTestFile(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+// A GitHub-authored comment body must not be able to emit terminal escape
+// sequences in the default text output.
+func TestWriteCommentsReportTextStripsControlCharacters(t *testing.T) {
+	const payload = "\x1b[2J\x1b[H\x1b]0;pwned\x07LGTM \x1b[32mapproved\x1b[0m"
+	report := &commentsReport{
+		SchemaVersion: "1",
+		Command:       "stack-pr comments",
+		Range:         commentsRange{Base: "main", Head: "HEAD", Remote: "origin", Target: "main"},
+		Stack: []commentsStackEntry{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa", Title: "First", Status: "fetched",
+		}},
+		PullRequests: []commentsPullRequestReport{{
+			Index: 1, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaaaaaaa",
+			Title:  "First\x1b[31m",
+			Status: "fetched",
+			Comments: []pr.CommentItem{{
+				Kind:   pr.CommentKindConversation,
+				Author: "alice\x1b[5m",
+				Body:   payload,
+			}},
+		}},
+	}
+	var out bytes.Buffer
+	if err := Write(&out, report, "text"); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	for _, bad := range []string{"\x1b", "\x07", "\x9b", "\x00"} {
+		if strings.Contains(text, bad) {
+			t.Fatalf("text output retained control character %q:\n%q", bad, text)
+		}
+	}
+	// The readable content survives; only the control characters are removed.
+	if !strings.Contains(text, "LGTM") || !strings.Contains(text, "alice") {
+		t.Fatalf("text output lost legible content:\n%s", text)
+	}
+}

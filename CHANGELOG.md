@@ -10,6 +10,11 @@
   from the read-only `view` command. Remote names, target branches, generated
   branch names, and `stack-info:` pull-request references are now validated
   before use, and remote positionals are terminated with `--`.
+- Fixed `checks` and `comments` printing GitHub-authored text verbatim in the
+  default `--format=text` output, which let a comment body containing ANSI/OSC
+  escape sequences repaint the terminal or forge tool output. Control
+  characters are now stripped from text output; `--format=json` was already
+  unaffected.
 
 - Fixed `submit`/`export` aborting with "missing stack membership field" when
   `github.native_stacks = auto` and the stack contains a PR created before the

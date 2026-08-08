@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 	"github.com/victorhsb/branchless-pr/internal/stackstate"
+	"github.com/victorhsb/branchless-pr/internal/textsafe"
 )
 
 type AppContext = invocation.AppContext
@@ -290,8 +292,14 @@ func newFailedCheckSummary(entry checksPullRequestReport, check pr.Check) failed
 func Write(w io.Writer, report *checksReport, format string, verbose bool) error {
 	switch format {
 	case "text":
-		writeChecksText(w, report, verbose)
-		return nil
+		// Render first, then strip control characters, so GitHub-authored
+		// check names and comment snippets cannot emit terminal escape
+		// sequences. JSON output needs no such pass because encoding/json
+		// escapes control characters.
+		var buf bytes.Buffer
+		writeChecksText(&buf, report, verbose)
+		_, err := io.WriteString(w, textsafe.String(buf.String()))
+		return err
 	case "json":
 		payload, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
