@@ -152,6 +152,9 @@ type ghPRViewComments struct {
 }
 
 func fetchPRCommentSummary(prRef string) (*prCommentSummary, error) {
+	if err := ValidateRef(prRef); err != nil {
+		return nil, err
+	}
 	out, err := runGHJSON([]string{"gh", "pr", "view", prRef, "--json", "number,url,comments,reviews"})
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view comments %s: %w", prRef, err)

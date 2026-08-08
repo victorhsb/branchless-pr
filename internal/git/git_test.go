@@ -71,7 +71,7 @@ func TestResolveRemoteRefs(t *testing.T) {
 	bin := t.TempDir()
 	fakeGit := filepath.Join(bin, "git")
 	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = ls-remote ] && [ \"$2\" = --heads ] && [ \"$3\" = origin ]; then\n" +
+		"if [ \"$1\" = ls-remote ] && [ \"$2\" = --heads ] && [ \"$3\" = -- ] && [ \"$4\" = origin ]; then\n" +
 		"  printf 'abc123\\trefs/heads/foo\\n'\n" +
 		"  exit 0\n" +
 		"fi\n" +
@@ -122,6 +122,7 @@ func TestForcePushWithLeaseUsesAtomicExplicitExpectations(t *testing.T) {
 		"--atomic",
 		"--force-with-lease=refs/heads/foo:abc123",
 		"--force-with-lease=refs/heads/bar:",
+		"--",
 		"origin",
 		"foo:refs/heads/foo",
 		"bar:refs/heads/bar",

@@ -265,7 +265,10 @@ func IsAncestor(a, b string) (bool, error) {
 
 // Fetch runs git fetch --prune on the given remote.
 func Fetch(remote string) error {
-	_, err := shell.Output([]string{"git", "fetch", "--prune", remote}, shell.RunOpts{})
+	if err := ValidateRemoteName(remote); err != nil {
+		return &Error{Op: "fetch", Err: err}
+	}
+	_, err := shell.Output([]string{"git", "fetch", "--prune", "--", remote}, shell.RunOpts{})
 	if err != nil {
 		return &Error{Op: "fetch", Err: err}
 	}
@@ -333,7 +336,10 @@ func CheckoutBranch(branch string) error {
 
 // ForcePush force-pushes local branches to remote (ref:ref format).
 func ForcePush(remote string, refs ...string) error {
-	args := []string{"git", "push", "-f", remote}
+	if err := validateRemoteAndRefs("force_push", remote, refs); err != nil {
+		return err
+	}
+	args := []string{"git", "push", "-f", "--", remote}
 	for _, r := range refs {
 		args = append(args, r+":"+r)
 	}
@@ -347,8 +353,11 @@ func ForcePush(remote string, refs ...string) error {
 // ResolveRemoteRefs reads current branch OIDs from the remote itself. Missing
 // refs are omitted from the result.
 func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error) {
+	if err := validateRemoteAndRefs("resolve_remote_refs", remote, refs); err != nil {
+		return nil, err
+	}
 	result := make(map[string]string, len(refs))
-	args := []string{"git", "ls-remote", "--heads", remote}
+	args := []string{"git", "ls-remote", "--heads", "--", remote}
 	for _, r := range refs {
 		args = append(args, "refs/heads/"+r)
 	}
@@ -375,12 +384,15 @@ func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error)
 // option form (supported since git 2.0) rather than the refspec ^ notation
 // (introduced in git 2.44) for broad compatibility.
 func ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
+	if err := validateRemoteAndRefs("force_push_with_lease", remote, refs); err != nil {
+		return err
+	}
 	args := []string{"git", "push", "--atomic"}
 	for _, r := range refs {
 		expect := leases[r]
 		args = append(args, fmt.Sprintf("--force-with-lease=refs/heads/%s:%s", r, expect))
 	}
-	args = append(args, remote)
+	args = append(args, "--", remote)
 	for _, r := range refs {
 		args = append(args, r+":refs/heads/"+r)
 	}
@@ -393,7 +405,10 @@ func ForcePushWithLease(remote string, leases map[string]string, refs ...string)
 
 // DeleteRemoteBranches deletes branches on the remote via empty ref.
 func DeleteRemoteBranches(remote string, branches ...string) error {
-	args := []string{"git", "push", "-f", remote}
+	if err := validateRemoteAndRefs("delete_remote_branches", remote, branches); err != nil {
+		return err
+	}
+	args := []string{"git", "push", "-f", "--", remote}
 	for _, b := range branches {
 		args = append(args, ":"+b)
 	}
@@ -573,10 +588,10 @@ func CommitAmend(msg []byte) error {
 // (`https://github.com/owner/repo[.git]`) and SSH (`git@github.com:owner/repo[.git]`)
 // forms.
 func RepoSlug(remote string) (owner, repo string, err error) {
-	if remote == "" {
-		return "", "", fmt.Errorf("remote name is empty")
+	if err := ValidateRemoteName(remote); err != nil {
+		return "", "", err
 	}
-	url, err := shell.Output([]string{"git", "remote", "get-url", remote}, shell.RunOpts{Quiet: true})
+	url, err := shell.Output([]string{"git", "remote", "get-url", "--", remote}, shell.RunOpts{Quiet: true})
 	if err != nil {
 		return "", "", &Error{Op: "repo_slug", Err: err}
 	}
@@ -656,6 +671,14 @@ func CommitMsg() (string, error) {
 	return out, nil
 }
 func TargetExists(remote, target string) error {
+	if err := ValidateRemoteName(remote); err != nil {
+		return &Error{Op: "target_exists", Err: err}
+	}
+	if err := ValidateRefName("target branch", target); err != nil {
+		return &Error{Op: "target_exists", Err: err}
+	}
+	// No `--` here: in rev-parse it separates revisions from paths, so it would
+	// make the ref be read as a pathname. Validation above keeps it positional.
 	ref := remote + "/" + target
 	_, err := shell.Output(
 		[]string{"git", "rev-parse", "--verify", ref},

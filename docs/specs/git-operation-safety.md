@@ -31,3 +31,13 @@ An active operation is reported when Git's resolved metadata contains a rebase, 
 | `CHERRY_PICK_HEAD` exists | cherry-pick state | cherry-pick active |
 | `sequencer/todo` exists | cherry-pick or aggregate sequencer state | operation active |
 | none of the recognized paths exists | aggregate sequencer state | no operation active |
+
+### Subprocess argument safety
+
+Values that reach a `git` or `gh` argument vector as positionals may originate outside the invoking user's control: the remote name, target branch, and branch-name template come from `.stack-pr.cfg`, which can be checked into a repository, and the pull-request reference comes from `stack-info:` metadata embedded in commit messages. Git parses a leading-dash positional as an option and accepts a transport URL wherever it accepts a remote name, so such values are validated before use rather than only being terminated with `--`.
+
+- Remote name is empty, begins with `-`, begins with `/` or `.`, contains `:`, or contains whitespace or control characters → reject the invocation before running any subprocess. This covers option injection (`--upload-pack=<cmd>`), transport URLs (`ext::`, `file://`), scp-style URLs, and filesystem paths, none of which are usable as a configured remote name by the commands that resolve remotes.
+- Target branch or generated branch name is empty, begins with `-`, or contains whitespace or control characters → reject the invocation.
+- Pull-request reference is empty, begins with `-`, or contains whitespace or control characters → reject the operation that would pass it to `gh`.
+- Remote and refspec positionals are additionally preceded by `--` wherever the subcommand accepts it, so a value can never be read as an option. `git rev-parse` is excluded because `--` there separates revisions from pathnames.
+- Validation runs during shared command initialization, so read-only inspection commands that resolve remote references are covered as well as mutating commands.

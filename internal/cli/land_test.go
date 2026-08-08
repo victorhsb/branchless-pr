@@ -156,8 +156,8 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/1 --rebase --auto")
 
 	git := readTestFile(t, gitLog)
-	mustContain(t, git, "remote get-url origin")
-	mustContain(t, git, "fetch --prune origin")
+	mustContain(t, git, "remote get-url -- origin")
+	mustContain(t, git, "fetch --prune -- origin")
 	mustContain(t, git, "checkout feature")
 	// Queued whole-stack mode does NOT delete branches or rebase.
 	if strings.Contains(git, "branch -D") {

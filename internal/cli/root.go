@@ -112,6 +112,18 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 				return fmt.Errorf("branch name template must contain $ID (or be one that appends /$ID): got %q", ca.BranchNameTemplate)
 			}
 
+			// Validate remote/target before any value reaches a git argument
+			// vector. These come from .stack-pr.cfg, which can be checked into
+			// a repository, and git parses a leading-dash positional as an
+			// option and accepts a transport URL wherever it takes a remote
+			// name. Read-only commands such as `view` reach the remote too.
+			if err := git.ValidateRemoteName(ca.Remote); err != nil {
+				return err
+			}
+			if err := git.ValidateRefName("target branch", ca.Target); err != nil {
+				return err
+			}
+
 			// Verbosity
 			if ca.Verbose {
 				slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))

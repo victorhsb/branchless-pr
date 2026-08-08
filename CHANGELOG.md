@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fixed a security issue where a `[repo] remote` or `target` value from
+  `.stack-pr.cfg` was passed to `git` as a bare positional. Because `git`
+  parses a leading-dash positional as an option and accepts a transport URL
+  wherever it accepts a remote name, a checked-in config such as
+  `remote = --upload-pack=<cmd>` could execute an arbitrary command, including
+  from the read-only `view` command. Remote names, target branches, generated
+  branch names, and `stack-info:` pull-request references are now validated
+  before use, and remote positionals are terminated with `--`.
+
 - Fixed `submit`/`export` aborting with "missing stack membership field" when
   `github.native_stacks = auto` and the stack contains a PR created before the
   native Stacks integration. A pull-request resource that omits the `stack`

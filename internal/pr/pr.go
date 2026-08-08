@@ -26,6 +26,9 @@ type Info struct {
 
 // View queries PR metadata from GitHub.
 func View(prRef string) (*Info, error) {
+	if err := ValidateRef(prRef); err != nil {
+		return nil, err
+	}
 	args := []string{
 		"gh", "pr", "view", prRef,
 		"--json", "baseRefName,headRefName,headRefOid,number,state,body,title,url,mergeStateStatus,isDraft",
@@ -69,6 +72,9 @@ func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
 
 // EditBase updates the base branch of a PR.
 func EditBase(prRef, base string) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "edit", prRef, "-B", base}
 	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
 	if err != nil {
@@ -90,6 +96,9 @@ func IsNativeStackBaseError(err error) bool {
 // API rejects any base edit. Callers that need to update the base should use
 // Edit instead.
 func EditTitleBody(prRef, title string, body []byte) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-"}
 	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 	if err != nil {
@@ -102,6 +111,9 @@ func EditTitleBody(prRef, title string, body []byte) error {
 // rejects the base change because the PR is part of a native Stack, it
 // retries with only the title and body, leaving the base unchanged.
 func Edit(prRef, title, base string, body []byte) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-", "-B", base}
 	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 	if err != nil {
@@ -179,6 +191,9 @@ func parseCreateOutput(out []byte) (string, error) {
 
 // Ready marks a PR as ready for review.
 func Ready(prRef string) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "ready", prRef}
 	_, err := shell.Output(args, shell.RunOpts{})
 	if err != nil {
@@ -189,6 +204,9 @@ func Ready(prRef string) error {
 
 // ReadyUndo marks a PR as draft again.
 func ReadyUndo(prRef string) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "ready", prRef, "--undo"}
 	_, err := shell.Output(args, shell.RunOpts{})
 	if err != nil {
@@ -199,6 +217,9 @@ func ReadyUndo(prRef string) error {
 
 // MergeSquash performs a squash merge on a PR.
 func MergeSquash(prRef, title string, body []byte) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "merge", prRef, "--squash", "-t", title, "-F", "-"}
 	_, _, err := shell.Run(args, shell.RunOpts{Stdin: body})
 	if err != nil {
@@ -211,6 +232,9 @@ func MergeSquash(prRef, title string, body []byte) error {
 // Commits land linearly on the PR's base branch, preserving their original
 // commit messages.
 func MergeRebase(prRef string) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "merge", prRef, "--rebase"}
 	_, _, err := shell.Run(args, shell.RunOpts{})
 	if err != nil {
@@ -306,6 +330,9 @@ func ghAPIRules(owner, repo, branch string) ([]byte, error) {
 // When the target branch requires a merge queue, GitHub adds the PR to the queue
 // once requirements are met; otherwise it enables auto-merge.
 func MergeRebaseAuto(prRef string) error {
+	if err := ValidateRef(prRef); err != nil {
+		return err
+	}
 	args := []string{"gh", "pr", "merge", prRef, "--rebase", "--auto"}
 	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
 	if err != nil {

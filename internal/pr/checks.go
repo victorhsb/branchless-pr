@@ -82,6 +82,9 @@ type PullRequestChecks struct {
 
 // FetchChecks fetches read-only PR checks and lightweight comment summary data.
 func FetchChecks(prRef string) (*PullRequestChecks, error) {
+	if err := ValidateRef(prRef); err != nil {
+		return nil, err
+	}
 	out, err := runGHJSON([]string{
 		"gh", "pr", "view", prRef,
 		"--json", "number,url,headRefName,baseRefName,headRefOid,statusCheckRollup,comments,reviews",

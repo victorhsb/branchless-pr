@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -344,6 +345,9 @@ func (i *inspector) checkOnlinePRState() (CheckEntry, error) {
 			continue
 		}
 		checked++
+		if err := pr.ValidateRef(e.PR()); err != nil {
+			return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("entry %d has an unusable PR reference: %v", idx, err)}, nil
+		}
 		out, err := i.run.Output([]string{"gh", "pr", "view", e.PR(), "--json", "baseRefName,headRefName,number,state,mergeStateStatus,isDraft"}, shell.RunOpts{Dir: i.opts.WorkDir})
 		if err != nil {
 			return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("could not query PR state for entry %d: %v", idx, err)}, nil
