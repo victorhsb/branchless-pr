@@ -240,19 +240,20 @@ func pathLast(s, sep string) string {
 // BranchTemplate holds the parsed branch-name-template.
 type BranchTemplate struct {
 	Raw        string
-	HasID      bool
-	BasePrefix string // everything before $ID, or the whole template if HasID
+	BasePrefix string // everything before $ID, or the whole template plus "/"
 	IDSuffix   string // everything after $ID
 }
 
 // ParseTemplate prepares a template for use.
-// If the template does not contain "$ID", "/$ID" is appended.
+// If the template does not contain "$ID", "/$ID" is appended, so every parsed
+// template yields an ID-bearing branch name. The default template
+// ("$USERNAME/stack") relies on this.
 func ParseTemplate(raw string) BranchTemplate {
 	if strings.Contains(raw, "$ID") {
 		parts := strings.SplitN(raw, "$ID", 2)
-		return BranchTemplate{Raw: raw, HasID: true, BasePrefix: parts[0], IDSuffix: parts[1]}
+		return BranchTemplate{Raw: raw, BasePrefix: parts[0], IDSuffix: parts[1]}
 	}
-	return BranchTemplate{Raw: raw, HasID: true, BasePrefix: raw + "/", IDSuffix: ""}
+	return BranchTemplate{Raw: raw, BasePrefix: raw + "/", IDSuffix: ""}
 }
 
 // Generate produces a branch name from template variables.

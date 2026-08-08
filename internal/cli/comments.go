@@ -37,7 +37,3 @@ func commentsCmd() *cobra.Command {
 func runComments(app *AppContext, opts commentsOptions, w io.Writer) error {
 	return commentsreport.Run(app, opts, w)
 }
-
-func runCommentsWithFetcher(app *AppContext, opts commentsOptions, w io.Writer, fetch commentsFetcher) error {
-	return commentsreport.RunWithFetcher(app, opts, w, fetch)
-}

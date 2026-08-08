@@ -7,9 +7,6 @@ import (
 
 func TestParseTemplateAppendsIDWhenMissing(t *testing.T) {
 	bt := ParseTemplate("$USERNAME/stack")
-	if !bt.HasID {
-		t.Fatalf("expected HasID true after auto-append")
-	}
 	got := bt.Generate("alice", "feature", 3)
 	want := "alice/stack/3"
 	if got != want {

@@ -41,7 +41,3 @@ By default the output is summary-first: a compact roll-up per pull request with 
 func runChecks(app *AppContext, opts checksOptions, w io.Writer) error {
 	return checksreport.Run(app, opts, w)
 }
-
-func runChecksWithFetcher(app *AppContext, opts checksOptions, w io.Writer, fetch checksFetcher) error {
-	return checksreport.RunWithFetcher(app, opts, w, fetch)
-}

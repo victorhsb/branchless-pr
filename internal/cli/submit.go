@@ -178,10 +178,6 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 
 const experimentalSubmitEngineEnv = "STACK_PR_EXPERIMENTAL_SUBMIT_ENGINE"
 
-func experimentalSubmitEngineEnabled(app *AppContext) bool {
-	return useExperimentalSubmitEngine(app)
-}
-
 func useExperimentalSubmitEngine(app *AppContext) bool {
 	if os.Getenv(experimentalSubmitEngineEnv) == "1" {
 		return true

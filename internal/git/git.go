@@ -136,48 +136,6 @@ func GetGHUsername() (string, error) {
 	return m[1], nil
 }
 
-// GetChangedFiles returns the paths of files changed between base and HEAD.
-// If base is empty, it defaults to "main".
-func GetChangedFiles(base string, repoDir ...string) ([]string, error) {
-	if base == "" {
-		base = "main"
-	}
-	args := []string{"git", "diff", "--name-only", base + "...HEAD"}
-	opts := shell.RunOpts{}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	out, err := shell.Output(args, opts)
-	if err != nil {
-		return nil, &Error{Op: "get_changed_files", Err: err}
-	}
-	var files []string
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			files = append(files, line)
-		}
-	}
-	return files, nil
-}
-
-// GetChangedDirs returns the set of top-level directories that contain changed files.
-func GetChangedDirs(base string, repoDir ...string) (map[string]struct{}, error) {
-	files, err := GetChangedFiles(base, repoDir...)
-	if err != nil {
-		return nil, err
-	}
-	dirs := make(map[string]struct{})
-	for _, f := range files {
-		dir := filepath.Dir(f)
-		if dir == "." {
-			dir = ""
-		}
-		dirs[dir] = struct{}{}
-	}
-	return dirs, nil
-}
-
 // IsRebaseInProgress reports whether a rebase is currently active.
 func IsRebaseInProgress(repoDir ...string) bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {

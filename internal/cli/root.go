@@ -12,7 +12,6 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/invocation"
-	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
 var (
@@ -105,12 +104,6 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			headExplicit := cmd.Flags().Changed("head")
 
 			ca := ResolveSharedArgs(cfg, flagBase, flagHead, flagRemote, flagTarget, hyperlinks, verbose, flagBranchTemplate, showTips)
-
-			// Validate branch template
-			tmpl := stack.ParseTemplate(ca.BranchNameTemplate)
-			if !tmpl.HasID {
-				return fmt.Errorf("branch name template must contain $ID (or be one that appends /$ID): got %q", ca.BranchNameTemplate)
-			}
 
 			// Validate remote/target before any value reaches a git argument
 			// vector. These come from .stack-pr.cfg, which can be checked into

@@ -42,7 +42,7 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 
 ### Cross-cutting flow
 
-`PersistentPreRunE` in `root.go` does heavy lifting for non-agent commands: merges config + flags into `CommonArgs`, validates the branch name template (`$ID` is required), checks `gh` is installed, finds repo root, resolves the current branch, auto-detects the git-branchless stack top when `--head` is not explicit, fetches the GH username, optionally stashes (submit/export only, skipped under `--dry-run`), enforces a clean tree except for `view`/`config`, checks `REMOTE/TARGET` exists (hint about `master` if `main` missing), and deduces `BASE` via `git merge-base` if not supplied. The `agent` subtree is short-circuited: it skips repo discovery, gh checks, and config-path resolution so it works outside a git repo.
+`PersistentPreRunE` in `root.go` does heavy lifting for non-agent commands: merges config + flags into `CommonArgs`, validates the remote name and target branch so config values cannot be read by `git` as options or transport URLs, checks `gh` is installed, finds repo root, resolves the current branch, auto-detects the git-branchless stack top when `--head` is not explicit, fetches the GH username, optionally stashes (submit/export only, skipped under `--dry-run`), enforces a clean tree except for `view`/`config`, checks `REMOTE/TARGET` exists (hint about `master` if `main` missing), and deduces `BASE` via `git merge-base` if not supplied. The `agent` subtree is short-circuited: it skips repo discovery, gh checks, and config-path resolution so it works outside a git repo.
 
 `AppContext` (`cli/types.go`) is the resolved per-invocation state, threaded through `context.Context` via `FromContext`. `WithRecovery` wraps mutating commands to restore the original branch and pop the auto-stash on error/panic.
 
@@ -52,7 +52,8 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 - **Each commit ↔ one PR.** Stack metadata is encoded in the commit message; `abandon` strips it; `land` squash-merges the bottom and rebases the rest.
 - **`--dry-run` (submit/export) performs no local Git mutation, no remote push, no PR write.** Stash is skipped under dry-run for the same reason.
 - **`land` is removable.** If `land.style = disable` in config, the subcommand is not registered at all.
-- **Branch template must contain `$ID`** (or implicitly via `/$ID`).
+- **Branch template always yields an `$ID`.** `stack.ParseTemplate` appends `/$ID` when the template omits it, so any non-empty template is usable; the default `$USERNAME/stack` relies on this. There is no rejection path.
+- **Config- and commit-authored values are validated before they reach `git`/`gh` argv** (`git.ValidateRemoteName`, `git.ValidateRefName`, `pr.ValidateRef`); remote-authored text is stripped of control characters before terminal output (`internal/textsafe`).
 
 ## Spec-driven workflow
 

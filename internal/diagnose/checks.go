@@ -241,10 +241,6 @@ func (i *inspector) checkBranchNameTemplate() (CheckEntry, error) {
 	if strings.TrimSpace(i.opts.BranchNameTemplate) == "" {
 		return CheckEntry{Status: StatusBlocking, Message: "branch-name template is empty", Blocks: []string{"submit"}, SuggestedFix: "Configure repo.branch_name_template or pass --branch-name-template."}, nil
 	}
-	tmpl := stack.ParseTemplate(i.opts.BranchNameTemplate)
-	if !tmpl.HasID {
-		return CheckEntry{Status: StatusBlocking, Message: "branch-name template must contain or imply $ID", Blocks: []string{"submit"}, SuggestedFix: "Use a template such as $USERNAME/stack or $USERNAME/$BRANCH/$ID."}, nil
-	}
 	return CheckEntry{Status: StatusOK, Message: "branch-name template is valid"}, nil
 }
 

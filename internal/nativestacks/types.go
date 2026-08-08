@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/config"
@@ -325,13 +324,6 @@ type ReceiptOperation struct {
 	PRs         []int
 	Fallback    string
 	Err         string
-}
-
-func sortedInts(xs []int) []int {
-	out := make([]int, len(xs))
-	copy(out, xs)
-	sort.Ints(out)
-	return out
 }
 
 func prSequence(s *Stack) []int {
