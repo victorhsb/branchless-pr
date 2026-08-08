@@ -1,9 +1,9 @@
 ---
 name: canon
-description: Manage Architecture Decision Records (ADRs) and SPECs with the canon CLI. Use whenever creating, recording, or revisiting an architectural decision; transitioning an ADR or SPEC through its lifecycle (accept, reject, supersede, deprecate, append); querying decision history; or initializing ADR storage - even if the user does not mention canon by name.
+description: Manage Architecture Decision Records (ADRs), SPECs, and domain entries with the canon CLI. Use whenever creating, recording, or revisiting an architectural decision; defining or updating a canonical domain concept; transitioning an ADR, SPEC, or domain entry through its lifecycle (accept, reject, supersede, deprecate, append); querying decision history or the domain model; or initializing document storage - even if the user does not mention canon by name.
 ---
-<!-- canon-skill-version: 5 -->
-<!-- canon-skill-hash: sha256:62e4cc90292f13c4650291e67ca9299eb5c9180cf35bfdc2ec5d1db3286cc26b -->
+<!-- canon-skill-version: 10 -->
+<!-- canon-skill-hash: sha256:42873dc2d50d4a1d4de86a2d7339393a1f3e3b45f990c40cdc09869c64b189d0 -->
 
 # CANON Agent Skill
 
@@ -12,11 +12,11 @@ Use canon to manage Architecture Decision Records without guessing repository st
 ## Operating rules
 
 1. Start with `canon commands` to inspect command metadata, side effects, selectors, examples, and dry-run availability.
-2. Run `canon doctor` before mutating ADRs. If it reports a missing ADR or SPEC directory, preview initialization with `canon adr init --dry-run` or `canon spec init --dry-run` before applying.
-3. Use JSON output unless a human explicitly asks for text. Every JSON response has `schema_version`, `status`, `data`, and optional `error` / `next_actions`.
+2. Run `canon doctor` before mutating documents. If it reports a missing ADR, SPEC, or domain directory, preview initialization with `canon adr init --dry-run`, `canon spec init --dry-run`, or `canon domain init --dry-run` before applying. Doctor also flags domain-model integrity problems: duplicate accepted titles and references to superseded or deprecated entries. For deep integrity checks (malformed files, duplicate ids, broken references, reciprocity, metadata validity), run `canon validate` — doctor answers "can I work here?", validate answers "is my corpus healthy?".
+3. Use JSON output unless a human explicitly asks for text or a bounded prompt projection. For prompt injection, `canon --format context adr list --status accepted` emits concise Markdown; use context format only with list commands. Every JSON response has `schema_version`, `status`, `data`, and optional `error` / `next_actions`.
 4. For every mutating command, run the same command with `--dry-run` first and verify the returned plan. The plan response is how you confirm selectors and side effects before anything touches disk; a correct dry-run carries `No changes were made.` in warnings.
-5. Use `canon list` (both kinds), `canon adr list` / `canon spec list`, `canon search --query ...`, and `canon show --id ...` to gather context before changing an ADR.
-6. Prefer selectors from CLI output. ADR ids are stable strings like `ADR-0001` and can be passed to `--id` or `--by`.
+5. Use `canon list` (all kinds), `canon adr list` / `canon spec list` / `canon domain list`, `canon search --query ...`, and `canon show --id ...` to gather context before changing a document.
+6. Prefer selectors from CLI output. Document ids are stable strings like `ADR-0001`, `SPEC-0001`, and `DM-0001` and can be passed to `--id` or `--by`.
 
 ## Common commands
 
@@ -25,6 +25,7 @@ Preview each of these with `--dry-run` first (rule 4), then apply:
 ```sh
 canon adr new --title "Use SQLite for local query index" --status proposed --context "Agents need fast local lookup." --decision "Use SQLite-backed indexes."
 canon spec new --title "Local query index" --requirements "Return ADRs by tag." --acceptance "canon list --tag storage returns ADR-0001."
+canon domain new --title "ADR" --definition "A dated, narrowly-scoped architecture commitment." --avoid "design doc: too broad; ticket: tracks work, not decisions"
 canon accept --id ADR-0001 --reason "Approved by the team."
 canon reject --id ADR-0001 --reason "Chose a different approach."
 canon supersede --id ADR-0001 --by ADR-0002 --reason "ADR-0002 captures the current storage approach."
@@ -49,7 +50,7 @@ A pure product decision (market, prioritization, pricing) is **not** architectur
 
 ### `canon` trigger list
 
-Decisions that affect the CLI contract, ADR file format, query behavior, lifecycle semantics, output schema, storage layout, or agent operating model are almost always architectural. Not every change to those surfaces is a commitment, but a change that fixes a contract downstream consumers will depend on is.
+Decisions that affect the CLI contract, ADR file format, query behavior, lifecycle semantics, output schema, or storage layout are architectural when they establish structural or cross-cutting commitments. Project processes, agent workflows, and skill behavior belong in `AGENTS.md` or the relevant `SKILL.md`, not in ADRs.
 
 ### Anti-patterns
 
@@ -60,8 +61,19 @@ Do not create an ADR for:
 - a changelog entry ("implemented back-references")
 - a bundle of unrelated decisions
 - a product strategy with no architectural consequence
+- a project process, agent workflow, or skill instruction
 - vague commitments ("be flexible")
 - obvious decisions with no real alternatives
+
+## When to create or change a domain entry
+
+Domain entries are the project's single source of truth for what things mean: one canonical concept per entry, with a definition, avoided terms (each with a reason), and relationships to other entries as relative markdown links.
+
+1. **Search before defining.** Run `canon domain search --query ...` first; if an entry exists, sharpen it instead of creating a parallel one.
+2. **One concept per entry.** The title is the canonical term. Do not bundle several terms into one entry.
+3. **Definitions carry no implementation details.** An entry says what a concept is, not how it is built.
+4. **Record rejected wording.** Every avoided term gets a reason, so future readers know why "design doc" is not an ADR.
+5. **Supersede is for redefinitions.** Renaming a concept retitles the same entry (title is content, not lifecycle metadata) plus a `canon append` history note; a changed meaning gets a new entry superseding the old.
 
 ## Recovery
 
