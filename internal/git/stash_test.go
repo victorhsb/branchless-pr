@@ -12,13 +12,13 @@ import (
 func TestStashSaveCleanTreeDoesNotClaimExistingUserStash(t *testing.T) {
 	repo := initTestRepo(t)
 	commitTestFile(t, repo, "tracked.txt", "original")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, shell.Default{})
 
 	writeStashTestFile(t, repo, "tracked.txt", "user stash")
 	runGitForTest(t, repo, "stash", "push", "-m", "user stash")
 	before := stashOIDsForTest(t, repo)
 
-	ref, err := StashSave("automatic")
+	ref, err := gitRepo.StashSave("automatic")
 	if err != nil {
 		t.Fatalf("StashSave: %v", err)
 	}
@@ -34,25 +34,9 @@ func TestStashSaveIgnoresUnexpectedHumanOutput(t *testing.T) {
 	repo := initTestRepo(t)
 	commitTestFile(t, repo, "tracked.txt", "original")
 	writeStashTestFile(t, repo, "tracked.txt", "automatic changes")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, noisyStashRunner{})
 
-	realGit := findExecutableForGitTest(t, "git")
-	bin := t.TempDir()
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = stash ] && [ \"$2\" = push ]; then\n" +
-		"  \"$REAL_GIT\" \"$@\" >/dev/null 2>&1\n" +
-		"  status=$?\n" +
-		"  printf 'sortie localisee inattendue: aucune phrase stable\\n'\n" +
-		"  exit $status\n" +
-		"fi\n" +
-		"exec \"$REAL_GIT\" \"$@\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("REAL_GIT", realGit)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	ref, err := StashSave("automatic")
+	ref, err := gitRepo.StashSave("automatic")
 	if err != nil {
 		t.Fatalf("StashSave: %v", err)
 	}
@@ -69,14 +53,14 @@ func TestStashRestorePreservesOlderAndNewerUserStashes(t *testing.T) {
 	commitTestFile(t, repo, "older.txt", "original older")
 	commitTestFile(t, repo, "automatic.txt", "original automatic")
 	commitTestFile(t, repo, "newer.txt", "original newer")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, shell.Default{})
 
 	writeStashTestFile(t, repo, "older.txt", "older user changes")
 	runGitForTest(t, repo, "stash", "push", "-m", "older user stash")
 	olderOID := stashOIDsForTest(t, repo)[0]
 
 	writeStashTestFile(t, repo, "automatic.txt", "automatic changes")
-	automatic, err := StashSave("automatic")
+	automatic, err := gitRepo.StashSave("automatic")
 	if err != nil {
 		t.Fatalf("StashSave: %v", err)
 	}
@@ -85,7 +69,7 @@ func TestStashRestorePreservesOlderAndNewerUserStashes(t *testing.T) {
 	runGitForTest(t, repo, "stash", "push", "-m", "newer user stash")
 	newerOID := stashOIDsForTest(t, repo)[0]
 
-	if err := StashRestore(automatic); err != nil {
+	if err := gitRepo.StashRestore(automatic); err != nil {
 		t.Fatalf("StashRestore: %v", err)
 	}
 	if got := readStashTestFile(t, repo, "automatic.txt"); got != "automatic changes" {
@@ -100,10 +84,10 @@ func TestStashRestorePreservesOlderAndNewerUserStashes(t *testing.T) {
 func TestStashRestoreConflictKeepsExactStash(t *testing.T) {
 	repo := initTestRepo(t)
 	commitTestFile(t, repo, "tracked.txt", "base")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, shell.Default{})
 
 	writeStashTestFile(t, repo, "tracked.txt", "automatic changes")
-	automatic, err := StashSave("automatic")
+	automatic, err := gitRepo.StashSave("automatic")
 	if err != nil {
 		t.Fatalf("StashSave: %v", err)
 	}
@@ -111,7 +95,7 @@ func TestStashRestoreConflictKeepsExactStash(t *testing.T) {
 	runGitForTest(t, repo, "add", "tracked.txt")
 	runGitForTest(t, repo, "commit", "-m", "conflict")
 
-	err = StashRestore(automatic)
+	err = gitRepo.StashRestore(automatic)
 	if err == nil {
 		t.Fatal("expected stash application conflict")
 	}
@@ -128,13 +112,13 @@ func TestStashRestoreConflictKeepsExactStash(t *testing.T) {
 func TestStashRestoreMissingEntryDoesNotChangeUserStashes(t *testing.T) {
 	repo := initTestRepo(t)
 	commitTestFile(t, repo, "tracked.txt", "base")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, shell.Default{})
 	writeStashTestFile(t, repo, "tracked.txt", "user changes")
 	runGitForTest(t, repo, "stash", "push", "-m", "user stash")
 	before := stashOIDsForTest(t, repo)
 
 	missing := StashRef{OID: strings.Repeat("a", 40)}
-	err := StashRestore(missing)
+	err := gitRepo.StashRestore(missing)
 	if err == nil || !strings.Contains(err.Error(), "no longer present") {
 		t.Fatalf("error = %v, want actionable missing-stash error", err)
 	}
@@ -171,17 +155,16 @@ func readStashTestFile(t *testing.T, repo, name string) string {
 	return string(contents)
 }
 
-func findExecutableForGitTest(t *testing.T, name string) string {
-	t.Helper()
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		candidate := filepath.Join(dir, name)
-		info, err := os.Stat(candidate)
-		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-			return candidate
-		}
+type noisyStashRunner struct {
+	shell.Default
+}
+
+func (r noisyStashRunner) Run(args []string, opts shell.RunOpts) ([]byte, []byte, error) {
+	stdout, stderr, err := r.Default.Run(args, opts)
+	if err == nil && len(args) >= 3 && args[0] == "git" && args[1] == "stash" && args[2] == "push" {
+		stdout = []byte("sortie localisee inattendue: aucune phrase stable\n")
 	}
-	t.Fatalf("%s not found on PATH", name)
-	return ""
+	return stdout, stderr, err
 }
 
 func equalStrings(a, b []string) bool {

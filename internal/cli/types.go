@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/victorhsb/branchless-pr/internal/config"
+	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/invocation"
 )
 
@@ -16,8 +17,8 @@ func DefaultReviewer(cfg *config.Config, arg string) string {
 	return invocation.DefaultReviewer(cfg, arg)
 }
 
-func RequireCleanRepo() error {
-	return invocation.RequireCleanRepo()
+func RequireCleanRepo(repo *git.Repo) error {
+	return invocation.RequireCleanRepo(repo)
 }
 
 func WithRecovery(app *AppContext, fn func() error) error {

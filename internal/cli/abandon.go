@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/config"
-	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -52,7 +51,7 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 		return nil
 	}
 
-	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	owner, repo, err := app.Git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return fmt.Errorf("cannot resolve owner/repo for native abandon check: %w", err)
 	}
@@ -137,7 +136,7 @@ func abandonImpl(app *AppContext) error {
 	for _, e := range st {
 		e.ReadMetadata()
 	}
-	if err := git.Fetch(app.Args.Remote); err != nil {
+	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
 	tmpl := stack.ParseTemplate(app.Args.BranchNameTemplate)
@@ -146,7 +145,7 @@ func abandonImpl(app *AppContext) error {
 	}
 	// Materialize local branches for each entry pointing at its commit.
 	for _, e := range st {
-		if err := git.Checkout(e.Commit.SHA, e.Head()); err != nil {
+		if err := app.Git.Checkout(e.Commit.SHA, e.Head()); err != nil {
 			return err
 		}
 	}
@@ -166,18 +165,18 @@ func abandonImpl(app *AppContext) error {
 		stripped = strings.TrimRight(stripped, "\n") + "\n"
 
 		if i == 0 {
-			if err := git.CheckoutBranch(e.Head()); err != nil {
+			if err := app.Git.CheckoutBranch(e.Head()); err != nil {
 				return err
 			}
 		} else {
-			if err := git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
+			if err := app.Git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
 				return fmt.Errorf("ERROR: Cannot rebase %q during abandon: %w", e.Head(), err)
 			}
 		}
-		if err := git.CommitAmend([]byte(stripped)); err != nil {
+		if err := app.Git.CommitAmend([]byte(stripped)); err != nil {
 			return fmt.Errorf("ERROR: Cannot strip stack metadata from %q: %w", e.Head(), err)
 		}
-		sha, err := git.RevParse(e.Head())
+		sha, err := app.Git.RevParse(e.Head())
 		if err != nil {
 			return err
 		}
@@ -186,7 +185,7 @@ func abandonImpl(app *AppContext) error {
 
 	// 9. Rebase the original branch on top of the new top.
 	if newTopSHA != "" {
-		if err := git.RebaseWithAuthorDate(newTopSHA, app.OrigBranch); err != nil {
+		if err := app.Git.RebaseWithAuthorDate(newTopSHA, app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase original branch onto stripped stack: %w", err)
 		}
 	}
@@ -196,7 +195,7 @@ func abandonImpl(app *AppContext) error {
 	for _, e := range st {
 		heads = append(heads, e.Head())
 	}
-	git.DeleteLocalBranches(heads...)
+	app.Git.DeleteLocalBranches(heads...)
 
 	// 11. Delete remote branches that both match the template AND are heads of stack entries.
 	remoteDel := make([]string, 0, len(heads))
@@ -206,7 +205,7 @@ func abandonImpl(app *AppContext) error {
 		}
 	}
 	if len(remoteDel) > 0 {
-		if err := git.DeleteRemoteBranches(app.Args.Remote, remoteDel...); err != nil {
+		if err := app.Git.DeleteRemoteBranches(app.Args.Remote, remoteDel...); err != nil {
 			fmt.Printf("Warning: failed to delete some remote branches: %v\n", err)
 		}
 	}

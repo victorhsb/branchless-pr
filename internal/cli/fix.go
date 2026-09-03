@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -48,7 +47,7 @@ After fixing metadata, run 'bpr submit' to push and update PRs.`,
 }
 
 func fixImpl(app *AppContext, opts fixOptions) error {
-	if git.AnySequencerInProgress() {
+	if app.Git.AnySequencerInProgress() {
 		return fmt.Errorf("ERROR: A Git operation (rebase, merge, or cherry-pick) is in progress. Finish or abort it before running fix")
 	}
 
@@ -57,12 +56,12 @@ func fixImpl(app *AppContext, opts fixOptions) error {
 		return fmt.Errorf("ERROR: Cannot load PR %d: %w", opts.PRNumber, err)
 	}
 
-	headSHA, err := git.RevParse("HEAD")
+	headSHA, err := app.Git.RevParse("HEAD")
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot determine HEAD: %w", err)
 	}
 
-	commitMsg, err := git.CommitMsg()
+	commitMsg, err := app.Git.CommitMsg()
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot read HEAD commit message: %w", err)
 	}
@@ -91,7 +90,7 @@ func fixImpl(app *AppContext, opts fixOptions) error {
 	}
 
 	newMsg := buildFixedMessage(commitMsg, prInfo.URL, prInfo.HeadRefName)
-	if err := git.CommitAmend([]byte(newMsg)); err != nil {
+	if err := app.Git.CommitAmend([]byte(newMsg)); err != nil {
 		return fmt.Errorf("ERROR: Cannot amend HEAD with stack metadata: %w", err)
 	}
 

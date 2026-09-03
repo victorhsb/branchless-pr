@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/victorhsb/branchless-pr/internal/config"
-	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/stack"
@@ -134,7 +133,7 @@ func nativeLandPreflight(app *AppContext, style string) error {
 		return nil
 	}
 
-	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	owner, repo, err := app.Git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return fmt.Errorf("cannot resolve owner/repo for native landing check: %w", err)
 	}
@@ -187,10 +186,10 @@ func nativeLandRefusal(st stack.Stack, style string) error {
 
 func landBottomOnly(app *AppContext, st stack.Stack) error {
 	bottom := st.Bottom()
-	if err := git.Fetch(app.Args.Remote); err != nil {
+	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
-	if err := git.Checkout(app.Args.Remote+"/"+bottom.Head(), bottom.Head()); err != nil {
+	if err := app.Git.Checkout(app.Args.Remote+"/"+bottom.Head(), bottom.Head()); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout remote branch while landing: %w", err)
 	}
 	if err := pr.EditBase(bottom.PR(), app.Args.Target); err != nil {
@@ -223,16 +222,16 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 
 		remoteTarget := app.Args.Remote + "/" + app.Args.Target
 		for _, e := range remaining {
-			if err := git.Fetch(app.Args.Remote); err != nil {
+			if err := app.Git.Fetch(app.Args.Remote); err != nil {
 				return err
 			}
-			if err := git.Checkout(app.Args.Remote+"/"+e.Head(), e.Head()); err != nil {
+			if err := app.Git.Checkout(app.Args.Remote+"/"+e.Head(), e.Head()); err != nil {
 				return fmt.Errorf("ERROR: Cannot checkout remote branch %q while landing: %w", e.Head(), err)
 			}
-			if err := git.RebaseWithAuthorDate(remoteTarget, e.Head()); err != nil {
+			if err := app.Git.RebaseWithAuthorDate(remoteTarget, e.Head()); err != nil {
 				return fmt.Errorf("ERROR: Cannot rebase %q onto %s: %w", e.Head(), remoteTarget, err)
 			}
-			if err := git.ForcePush(app.Args.Remote, e.Head()); err != nil {
+			if err := app.Git.ForcePush(app.Args.Remote, e.Head()); err != nil {
 				return fmt.Errorf("ERROR: Cannot push %q: %w", e.Head(), err)
 			}
 		}
@@ -254,7 +253,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 var landWholeStack = landWholeStackImpl
 
 func landWholeStackImpl(app *AppContext, st stack.Stack) error {
-	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	owner, repo, err := app.Git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot resolve owner/repo from remote %q: %w", app.Args.Remote, err)
 	}
@@ -274,7 +273,7 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 		return fmt.Errorf("ERROR: --whole-stack only works for repositories with merge queue enabled")
 	}
 
-	if err := git.Fetch(app.Args.Remote); err != nil {
+	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
 
@@ -286,7 +285,7 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 		return err
 	}
 
-	if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+	if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 	}
 	fmt.Printf("Whole-stack landing has been queued for %s\n", tip.PR())
@@ -297,7 +296,7 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 // rebases the local target plus original branch onto REMOTE/TARGET. Shared
 // between bottom-only and whole-stack landing.
 func landCleanup(app *AppContext, st stack.Stack) error {
-	if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+	if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 	}
 
@@ -305,15 +304,15 @@ func landCleanup(app *AppContext, st stack.Stack) error {
 	for _, e := range st {
 		heads = append(heads, e.Head())
 	}
-	git.DeleteLocalBranches(heads...)
+	app.Git.DeleteLocalBranches(heads...)
 
 	remoteTarget := app.Args.Remote + "/" + app.Args.Target
-	if exists, _ := git.BranchExists(app.Args.Target); exists {
-		if err := git.Rebase(remoteTarget, app.Args.Target); err != nil {
+	if exists, _ := app.Git.BranchExists(app.Args.Target); exists {
+		if err := app.Git.Rebase(remoteTarget, app.Args.Target); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase local target %q: %w", app.Args.Target, err)
 		}
 	}
-	if err := git.Rebase(remoteTarget, app.OrigBranch); err != nil {
+	if err := app.Git.Rebase(remoteTarget, app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot rebase original branch %q: %w", app.OrigBranch, err)
 	}
 	return nil

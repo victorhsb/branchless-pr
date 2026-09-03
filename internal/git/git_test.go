@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
 func TestIsFullSHA(t *testing.T) {
@@ -33,7 +34,7 @@ func TestUsernameOverride(t *testing.T) {
 	DefaultConfig().SetUsernameOverride(&u)
 	t.Cleanup(func() { DefaultConfig().SetUsernameOverride(nil) })
 
-	got, err := GetGHUsername()
+	got, err := New("", nil).GetGHUsername()
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}
@@ -43,22 +44,14 @@ func TestUsernameOverride(t *testing.T) {
 }
 
 func TestBranchlessStackHeadReturnsTopCommit(t *testing.T) {
-	bin := t.TempDir()
-	fakeGit := filepath.Join(bin, "git")
 	const bottom = "1111111111111111111111111111111111111111"
 	const top = "2222222222222222222222222222222222222222"
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = branchless ] && [ \"$2\" = query ] && [ \"$3\" = -r ] && [ \"$4\" = 'stack()' ]; then\n" +
-		"  printf '%s\\n%s\\n' " + bottom + " " + top + "\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"exit 1\n"
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Exact("git", "branchless", "query", "-r", "stack()"),
+		Stdout: bottom + "\n" + top + "\n",
+	})
 
-	got, ok := BranchlessStackHead()
+	got, ok := New("", run).BranchlessStackHead()
 	if !ok {
 		t.Fatalf("expected branchless stack head")
 	}
@@ -68,20 +61,12 @@ func TestBranchlessStackHeadReturnsTopCommit(t *testing.T) {
 }
 
 func TestResolveRemoteRefs(t *testing.T) {
-	bin := t.TempDir()
-	fakeGit := filepath.Join(bin, "git")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = ls-remote ] && [ \"$2\" = --heads ] && [ \"$3\" = -- ] && [ \"$4\" = origin ]; then\n" +
-		"  printf 'abc123\\trefs/heads/foo\\n'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"exit 1\n"
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Exact("git", "ls-remote", "--heads", "--", "origin", "refs/heads/foo", "refs/heads/bar"),
+		Stdout: "abc123\trefs/heads/foo\n",
+	})
 
-	got, err := ResolveRemoteRefs("origin", "foo", "bar")
+	got, err := New("", run).ResolveRemoteRefs("origin", "foo", "bar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,53 +79,36 @@ func TestResolveRemoteRefs(t *testing.T) {
 }
 
 func TestForcePushWithLeaseUsesAtomicExplicitExpectations(t *testing.T) {
-	bin := t.TempDir()
-	fakeGit := filepath.Join(bin, "git")
-	logPath := filepath.Join(t.TempDir(), "git.log")
-	script := "#!/bin/sh\n" +
-		"printf '%s\\n' \"$@\" > \"$BPR_GIT_TEST_LOG\"\n"
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("BPR_GIT_TEST_LOG", logPath)
+	run := shelltest.New(t, shelltest.Response{
+		Match: shelltest.Exact(
+			"git",
+			"push",
+			"--atomic",
+			"--force-with-lease=refs/heads/foo:abc123",
+			"--force-with-lease=refs/heads/bar:",
+			"--",
+			"origin",
+			"foo:refs/heads/foo",
+			"bar:refs/heads/bar",
+		),
+	})
 
-	err := ForcePushWithLease("origin", map[string]string{
+	err := New("", run).ForcePushWithLease("origin", map[string]string{
 		"foo": "abc123",
 		"bar": "",
 	}, "foo", "bar")
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := strings.Fields(string(data))
-	want := []string{
-		"push",
-		"--atomic",
-		"--force-with-lease=refs/heads/foo:abc123",
-		"--force-with-lease=refs/heads/bar:",
-		"--",
-		"origin",
-		"foo:refs/heads/foo",
-		"bar:refs/heads/bar",
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("git args:\n%v\nwant:\n%v", got, want)
-	}
 }
 
 func TestBranchlessStackHeadReturnsFalseWhenUnavailable(t *testing.T) {
-	bin := t.TempDir()
-	fakeGit := filepath.Join(bin, "git")
-	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	run := shelltest.New(t, shelltest.Response{
+		Match:    shelltest.Exact("git", "branchless", "query", "-r", "stack()"),
+		ExitCode: 1,
+	})
 
-	if got, ok := BranchlessStackHead(); ok || got != "" {
+	if got, ok := New("", run).BranchlessStackHead(); ok || got != "" {
 		t.Fatalf("BranchlessStackHead = %q, %v; want empty, false", got, ok)
 	}
 }
@@ -150,24 +118,25 @@ func TestGitOperationDetectionRecognizesMarkers(t *testing.T) {
 		name      string
 		marker    string
 		directory bool
-		detect    func(...string) bool
+		detect    func(*Repo) bool
 	}{
-		{name: "rebase merge", marker: "rebase-merge", directory: true, detect: IsRebaseInProgress},
-		{name: "rebase apply", marker: "rebase-apply", directory: true, detect: IsRebaseInProgress},
-		{name: "merge", marker: "MERGE_HEAD", detect: IsMergeInProgress},
-		{name: "cherry-pick", marker: "CHERRY_PICK_HEAD", detect: IsCherryPickInProgress},
-		{name: "sequencer", marker: "sequencer/todo", detect: IsCherryPickInProgress},
+		{name: "rebase merge", marker: "rebase-merge", directory: true, detect: func(r *Repo) bool { return r.IsRebaseInProgress() }},
+		{name: "rebase apply", marker: "rebase-apply", directory: true, detect: func(r *Repo) bool { return r.IsRebaseInProgress() }},
+		{name: "merge", marker: "MERGE_HEAD", detect: func(r *Repo) bool { return r.IsMergeInProgress() }},
+		{name: "cherry-pick", marker: "CHERRY_PICK_HEAD", detect: func(r *Repo) bool { return r.IsCherryPickInProgress() }},
+		{name: "sequencer", marker: "sequencer/todo", detect: func(r *Repo) bool { return r.IsCherryPickInProgress() }},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := initTestRepo(t)
 			writeOperationMarker(t, repo, tt.marker, tt.directory)
+			gitRepo := New(repo, nil)
 
-			if !tt.detect(repo) {
+			if !tt.detect(gitRepo) {
 				t.Fatalf("%s was not detected in %s", tt.marker, repo)
 			}
-			if !AnySequencerInProgress(repo) {
+			if !gitRepo.AnySequencerInProgress() {
 				t.Fatalf("aggregate operation detection missed %s", tt.marker)
 			}
 		})
@@ -176,7 +145,7 @@ func TestGitOperationDetectionRecognizesMarkers(t *testing.T) {
 
 func TestAnySequencerInProgressReturnsFalseWithoutMarkers(t *testing.T) {
 	repo := initTestRepo(t)
-	if AnySequencerInProgress(repo) {
+	if New(repo, nil).AnySequencerInProgress() {
 		t.Fatal("operation reported active in repository without operation markers")
 	}
 }
@@ -189,9 +158,7 @@ func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeOperationMarker(t, repo, "rebase-merge", true)
-		withWorkingDir(t, subdir)
-
-		if !IsRebaseInProgress() {
+		if !New(subdir, nil).IsRebaseInProgress() {
 			t.Fatal("rebase was not detected from a repository subdirectory")
 		}
 	})
@@ -203,7 +170,7 @@ func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
 		runGitForTest(t, repo, "worktree", "add", "-b", "linked", linked)
 		writeOperationMarker(t, linked, "MERGE_HEAD", false)
 
-		if !IsMergeInProgress(linked) {
+		if !New(linked, nil).IsMergeInProgress() {
 			t.Fatal("merge was not detected in a linked worktree")
 		}
 	})
@@ -216,7 +183,7 @@ func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
 		runGitForTest(t, super, "-c", "protocol.file.allow=always", "submodule", "add", source, "modules/child")
 		writeOperationMarker(t, child, "CHERRY_PICK_HEAD", false)
 
-		if !IsCherryPickInProgress(child) {
+		if !New(child, nil).IsCherryPickInProgress() {
 			t.Fatal("cherry-pick was not detected in a submodule")
 		}
 	})
@@ -228,7 +195,7 @@ func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
 		runGitForTest(t, parent, "init", "-b", "main", "--separate-git-dir", gitDir, worktree)
 		writeOperationMarker(t, worktree, "sequencer/todo", false)
 
-		if !IsCherryPickInProgress(worktree) {
+		if !New(worktree, nil).IsCherryPickInProgress() {
 			t.Fatal("sequencer was not detected with a separate Git directory")
 		}
 	})
@@ -237,19 +204,19 @@ func TestGitOperationDetectionSupportsRepositoryLayouts(t *testing.T) {
 func TestForceUpdateBranchCreatesMissingBranch(t *testing.T) {
 	repo := initTestRepo(t)
 	sha := commitTestFile(t, repo, "one.txt", "one")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, nil)
 
-	if err := ForceUpdateBranch("stack/one", sha); err != nil {
+	if err := gitRepo.ForceUpdateBranch("stack/one", sha); err != nil {
 		t.Fatalf("ForceUpdateBranch returned error: %v", err)
 	}
-	got, err := RevParse("stack/one")
+	got, err := gitRepo.RevParse("stack/one")
 	if err != nil {
 		t.Fatalf("RevParse returned error: %v", err)
 	}
 	if got != sha {
 		t.Fatalf("stack/one = %s, want %s", got, sha)
 	}
-	if branch, err := CurrentBranchName(); err != nil || branch != "main" {
+	if branch, err := gitRepo.CurrentBranchName(); err != nil || branch != "main" {
 		t.Fatalf("current branch = %q, %v; want main", branch, err)
 	}
 }
@@ -258,15 +225,15 @@ func TestForceUpdateBranchResetsExistingBranch(t *testing.T) {
 	repo := initTestRepo(t)
 	oldSHA := commitTestFile(t, repo, "one.txt", "one")
 	newSHA := commitTestFile(t, repo, "two.txt", "two")
-	withWorkingDir(t, repo)
+	gitRepo := New(repo, nil)
 
-	if err := ForceUpdateBranch("stack/one", newSHA); err != nil {
+	if err := gitRepo.ForceUpdateBranch("stack/one", newSHA); err != nil {
 		t.Fatalf("ForceUpdateBranch create returned error: %v", err)
 	}
-	if err := ForceUpdateBranch("stack/one", oldSHA); err != nil {
+	if err := gitRepo.ForceUpdateBranch("stack/one", oldSHA); err != nil {
 		t.Fatalf("ForceUpdateBranch reset returned error: %v", err)
 	}
-	got, err := RevParse("stack/one")
+	got, err := gitRepo.RevParse("stack/one")
 	if err != nil {
 		t.Fatalf("RevParse returned error: %v", err)
 	}
@@ -278,10 +245,9 @@ func TestForceUpdateBranchResetsExistingBranch(t *testing.T) {
 func TestForceUpdateBranchSkipsCurrentBranchWhenAlreadyAtStartPoint(t *testing.T) {
 	repo := initTestRepo(t)
 	sha := commitTestFile(t, repo, "one.txt", "one")
-	withWorkingDir(t, repo)
 	runGitForTest(t, repo, "switch", "-c", "stack/one")
 
-	if err := ForceUpdateBranch("stack/one", sha); err != nil {
+	if err := New(repo, nil).ForceUpdateBranch("stack/one", sha); err != nil {
 		t.Fatalf("ForceUpdateBranch returned error: %v", err)
 	}
 }
@@ -290,10 +256,9 @@ func TestForceUpdateBranchRejectsMovingCurrentBranch(t *testing.T) {
 	repo := initTestRepo(t)
 	oldSHA := commitTestFile(t, repo, "one.txt", "one")
 	commitTestFile(t, repo, "two.txt", "two")
-	withWorkingDir(t, repo)
 	runGitForTest(t, repo, "switch", "-c", "stack/one")
 
-	err := ForceUpdateBranch("stack/one", oldSHA)
+	err := New(repo, nil).ForceUpdateBranch("stack/one", oldSHA)
 	if err == nil {
 		t.Fatalf("ForceUpdateBranch returned nil error")
 	}
@@ -305,9 +270,8 @@ func TestForceUpdateBranchRejectsMovingCurrentBranch(t *testing.T) {
 func TestForceUpdateBranchWrapsErrors(t *testing.T) {
 	repo := initTestRepo(t)
 	commitTestFile(t, repo, "one.txt", "one")
-	withWorkingDir(t, repo)
 
-	err := ForceUpdateBranch("bad branch", "HEAD")
+	err := New(repo, nil).ForceUpdateBranch("bad branch", "HEAD")
 	if err == nil {
 		t.Fatalf("ForceUpdateBranch returned nil error")
 	}
@@ -374,17 +338,5 @@ func writeOperationMarker(t *testing.T, repo, marker string, directory bool) {
 	}
 	if err := os.WriteFile(path, []byte("test operation marker\n"), 0o644); err != nil {
 		t.Fatalf("write operation marker %s: %v", path, err)
-	}
-}
-
-func withWorkingDir(t *testing.T, dir string) {
-	t.Helper()
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(cwd) })
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir %s: %v", dir, err)
 	}
 }

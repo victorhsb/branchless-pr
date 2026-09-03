@@ -8,6 +8,7 @@ import (
 
 	gitpkg "github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
 func TestAutomaticStashRestoredAcrossInvocationLifecycle(t *testing.T) {
@@ -57,10 +58,10 @@ func TestAutomaticStashRestoredAcrossInvocationLifecycle(t *testing.T) {
 			if tt.operationMarker != "" {
 				createGitOperationMarker(t, realGit, repo, tt.operationMarker)
 			}
-			installStashLifecycleCommands(t, realGit, tt.forceDirtyStatus, false)
+			runner := installStashLifecycleCommands(t, tt.forceDirtyStatus, false)
 			chdirForTest(t, repo)
 
-			_, err := executeRootForTest(tt.args)
+			_, err := executeRootForTest(tt.args, runner)
 			if tt.wantError == "" {
 				if err != nil {
 					t.Fatalf("execute submit: %v", err)
@@ -80,10 +81,10 @@ func TestPreRunPreservesInitializationAndStashRestoreFailures(t *testing.T) {
 	t.Cleanup(func() { gitpkg.DefaultConfig().SetUsernameOverride(nil) })
 
 	repo, realGit := setupStashLifecycleRepo(t)
-	installStashLifecycleCommands(t, realGit, false, true)
+	runner := installStashLifecycleCommands(t, false, true)
 	chdirForTest(t, repo)
 
-	_, err := executeRootForTest([]string{"submit", "--stash", "--base", "HEAD", "--target", "missing"})
+	_, err := executeRootForTest([]string{"submit", "--stash", "--base", "HEAD", "--target", "missing"}, runner)
 	if err == nil {
 		t.Fatal("expected target validation and stash restoration error")
 	}
@@ -116,10 +117,10 @@ func TestAutomaticStashRestorationPreservesPreExistingUserStash(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("automatic changes\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	installStashLifecycleCommands(t, realGit, false, false)
+	runner := installStashLifecycleCommands(t, false, false)
 	chdirForTest(t, repo)
 
-	_, err := executeRootForTest([]string{"submit", "--stash", "--base", "HEAD", "--target", "missing"})
+	_, err := executeRootForTest([]string{"submit", "--stash", "--base", "HEAD", "--target", "missing"}, runner)
 	if err == nil || !strings.Contains(err.Error(), "target branch missing") {
 		t.Fatalf("error = %v, want target validation failure", err)
 	}
@@ -138,12 +139,12 @@ func TestAutomaticStashRestorationPreservesPreExistingUserStash(t *testing.T) {
 func TestRestoreStashConsumesIdentityOnlyAfterSuccess(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		repo, _ := setupStashLifecycleRepo(t)
-		chdirForTest(t, repo)
-		ref, err := gitpkg.StashSave("automatic")
+		gitRepo := gitpkg.New(repo, shell.Default{})
+		ref, err := gitRepo.StashSave("automatic")
 		if err != nil {
 			t.Fatal(err)
 		}
-		app := &AppContext{AutomaticStash: ref}
+		app := &AppContext{Git: gitRepo, AutomaticStash: ref}
 
 		if err := app.RestoreStash(); err != nil {
 			t.Fatalf("RestoreStash: %v", err)
@@ -155,8 +156,8 @@ func TestRestoreStashConsumesIdentityOnlyAfterSuccess(t *testing.T) {
 
 	t.Run("conflict", func(t *testing.T) {
 		repo, realGit := setupStashLifecycleRepo(t)
-		chdirForTest(t, repo)
-		ref, err := gitpkg.StashSave("automatic")
+		gitRepo := gitpkg.New(repo, shell.Default{})
+		ref, err := gitRepo.StashSave("automatic")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +166,7 @@ func TestRestoreStashConsumesIdentityOnlyAfterSuccess(t *testing.T) {
 		}
 		runGitForStashTest(t, realGit, repo, "add", "tracked.txt")
 		runGitForStashTest(t, realGit, repo, "commit", "-m", "conflict")
-		app := &AppContext{AutomaticStash: ref}
+		app := &AppContext{Git: gitRepo, AutomaticStash: ref}
 
 		if err := app.RestoreStash(); err == nil {
 			t.Fatal("expected restoration conflict")
@@ -206,36 +207,49 @@ func setupStashLifecycleRepo(t *testing.T) (repo, realGit string) {
 	return repo, realGit
 }
 
-func installStashLifecycleCommands(t *testing.T, realGit string, forceDirtyStatus, failStashRestore bool) {
+func installStashLifecycleCommands(t *testing.T, forceDirtyStatus, failStashRestore bool) shell.Runner {
 	t.Helper()
 	bin := t.TempDir()
 	ghScript := "#!/bin/sh\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(ghScript), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if forceDirtyStatus || failStashRestore {
-		gitScript := "#!/bin/sh\n" +
-			"if [ \"$FORCE_DIRTY_STATUS\" = 1 ] && [ \"$1\" = status ] && [ \"$2\" = --porcelain ]; then\n" +
-			"  printf ' M tracked.txt\\n'\n" +
-			"  exit 0\n" +
-			"fi\n" +
-			"if [ \"$FAIL_STASH_RESTORE\" = 1 ] && [ \"$1\" = stash ] && [ \"$2\" = apply ]; then\n" +
-			"  printf 'forced stash apply failure\\n' >&2\n" +
-			"  exit 42\n" +
-			"fi\n" +
-			"exec \"$REAL_GIT\" \"$@\"\n"
-		if err := os.WriteFile(filepath.Join(bin, "git"), []byte(gitScript), 0o755); err != nil {
-			t.Fatal(err)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return stashLifecycleRunner{
+		forceDirtyStatus: forceDirtyStatus,
+		failStashRestore: failStashRestore,
+	}
+}
+
+type stashLifecycleRunner struct {
+	forceDirtyStatus bool
+	failStashRestore bool
+}
+
+func (r stashLifecycleRunner) Output(args []string, opts shell.RunOpts) (string, error) {
+	if r.forceDirtyStatus && equalArgs(args, "git", "status", "--porcelain") {
+		return " M tracked.txt", nil
+	}
+	return (shell.Default{}).Output(args, opts)
+}
+
+func (r stashLifecycleRunner) Run(args []string, opts shell.RunOpts) ([]byte, []byte, error) {
+	if r.failStashRestore && len(args) >= 3 && args[0] == "git" && args[1] == "stash" && args[2] == "apply" {
+		return nil, []byte("forced stash apply failure\n"), &shelltest.ExitError{Code: 42}
+	}
+	return (shell.Default{}).Run(args, opts)
+}
+
+func equalArgs(got []string, want ...string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
 		}
 	}
-	t.Setenv("REAL_GIT", realGit)
-	if forceDirtyStatus {
-		t.Setenv("FORCE_DIRTY_STATUS", "1")
-	}
-	if failStashRestore {
-		t.Setenv("FAIL_STASH_RESTORE", "1")
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return true
 }
 
 func createGitOperationMarker(t *testing.T, realGit, repo, marker string) {

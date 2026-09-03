@@ -9,10 +9,11 @@ import (
 	"testing"
 
 	prompt "github.com/victorhsb/branchless-pr/internal/agent"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 func TestUserFacingCommandsHaveAgentRegistryEntries(t *testing.T) {
-	cmd, err := newRootCommand("stack-pr", []string{"agent", "prompt"})
+	cmd, err := newRootCommand("stack-pr", []string{"agent", "prompt"}, shell.Default{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,8 +241,12 @@ func TestAgentPromptRunsWithoutGHOnPath(t *testing.T) {
 	}
 }
 
-func executeRootForTest(args []string) (string, error) {
-	cmd, err := newRootCommand("stack-pr", args)
+func executeRootForTest(args []string, runners ...shell.Runner) (string, error) {
+	var runner shell.Runner = shell.Default{}
+	if len(runners) > 0 {
+		runner = runners[0]
+	}
+	cmd, err := newRootCommand("stack-pr", args, runner)
 	if err != nil {
 		return "", err
 	}

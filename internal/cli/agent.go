@@ -36,7 +36,9 @@ func agentDiagnoseCmd() *cobra.Command {
 			}
 
 			cfg := config.Defaults()
-			if p, err := config.FilePath(); err == nil {
+			app, _ := FromContext(cmd.Context())
+			repoRoot, _ := app.Git.RepoRoot()
+			if p, err := config.FilePath(repoRoot); err == nil {
 				if loaded, err := config.Load(p); err == nil {
 					loaded.Merge(cfg)
 					cfg = loaded

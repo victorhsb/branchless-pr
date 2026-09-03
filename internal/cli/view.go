@@ -35,7 +35,7 @@ func viewCmd() *cobra.Command {
 func runView(app *AppContext, format string) error {
 	// 2. Warn if base is auto-updatable.
 	remoteTarget := app.Args.Remote + "/" + app.Args.Target
-	if warn, err := maybeWarnBaseBehind(app.Args.Base, remoteTarget, app.Args.Head); err != nil {
+	if warn, err := maybeWarnBaseBehind(app.Git, app.Args.Base, remoteTarget, app.Args.Head); err != nil {
 		return err
 	} else if warn != "" {
 		fmt.Println(warn)
@@ -123,17 +123,17 @@ func writeViewStack(w io.Writer, st stack.Stack, format string, links bool) erro
 // maybeWarnBaseBehind returns a non-empty warning string when the local base is
 // strictly behind REMOTE/TARGET while HEAD already contains it (same condition
 // that submit would auto-rebase).
-func maybeWarnBaseBehind(base, remoteTarget, head string) (string, error) {
-	baseAncRemote, err := git.IsAncestor(base, remoteTarget)
+func maybeWarnBaseBehind(repo *git.Repo, base, remoteTarget, head string) (string, error) {
+	baseAncRemote, err := repo.IsAncestor(base, remoteTarget)
 	if err != nil || !baseAncRemote {
 		return "", nil
 	}
-	remoteAncHead, err := git.IsAncestor(remoteTarget, head)
+	remoteAncHead, err := repo.IsAncestor(remoteTarget, head)
 	if err != nil || !remoteAncHead {
 		return "", nil
 	}
-	baseHash, _ := git.RevParse(base)
-	targetHash, _ := git.RevParse(remoteTarget)
+	baseHash, _ := repo.RevParse(base)
+	targetHash, _ := repo.RevParse(remoteTarget)
 	if baseHash == targetHash {
 		return "", nil
 	}
@@ -158,7 +158,7 @@ func loadNativeMembership(app *AppContext, st stack.Stack, mode config.NativeSta
 		return nil
 	}
 
-	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	owner, repo, err := app.Git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return fmt.Errorf("cannot resolve owner/repo for native membership: %w", err)
 	}

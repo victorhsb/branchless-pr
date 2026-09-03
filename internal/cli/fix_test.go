@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
 func TestFixCmdExposesFlags(t *testing.T) {
@@ -95,7 +96,8 @@ fi
 	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
 		t.Fatal(err)
 	}
-	headSHA, _ := git.RevParse("HEAD")
+	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	gitRepo := git.New(repoDir, newFixGitRunner(t, headSHA, "Hello world", false))
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +105,7 @@ fi
 	out := captureStdout(t, func() {
 		app := &AppContext{
 			Config: config.Defaults(),
+			Git:    gitRepo,
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -179,7 +182,13 @@ fi
 	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
 		t.Fatal(err)
 	}
-	headSHA, _ := git.RevParse("HEAD")
+	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	gitRepo := git.New(repoDir, newFixGitRunner(
+		t,
+		headSHA,
+		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/42, branch: feature",
+		false,
+	))
 	// update-ref requires a real git remote ref
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
@@ -188,6 +197,7 @@ fi
 	out := captureStdout(t, func() {
 		app := &AppContext{
 			Config: config.Defaults(),
+			Git:    gitRepo,
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -254,13 +264,20 @@ fi
 	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
 		t.Fatal(err)
 	}
-	headSHA, _ := git.RevParse("HEAD")
+	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	gitRepo := git.New(repoDir, newFixGitRunner(
+		t,
+		headSHA,
+		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch",
+		false,
+	))
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
 	}
 
 	err := fixImpl(&AppContext{
 		Config: config.Defaults(),
+		Git:    gitRepo,
 		Args: CommonArgs{
 			Base:   headSHA,
 			Head:   "HEAD",
@@ -305,21 +322,6 @@ func TestFixReplaceOverwritesDifferentMetadata(t *testing.T) {
 	}
 
 	binDir := t.TempDir()
-	logPath := filepath.Join(binDir, "git.log")
-	// Fake git that logs amends
-	gitScript := fmt.Sprintf(`#!/bin/sh
-printf '%%s\n' "$*" >> "%s"
-if [ "$1" = "commit" ] && [ "$2" = "--amend" ]; then
-	exit 0
-fi
-exec /usr/bin/git "$@"
-`, logPath)
-	gitPath := filepath.Join(binDir, "git")
-	if err := os.WriteFile(gitPath, []byte(gitScript), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
-	t.Setenv("GIT_LOG", logPath)
-
 	ghPath := filepath.Join(binDir, "gh")
 	ghScript := `#!/bin/sh
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
@@ -339,7 +341,14 @@ fi
 	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
 		t.Fatal(err)
 	}
-	headSHA, _ := git.RevParse("HEAD")
+	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	fixRun := newFixGitRunner(
+		t,
+		headSHA,
+		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch",
+		true,
+	)
+	gitRepo := git.New(repoDir, fixRun)
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
 	}
@@ -347,6 +356,7 @@ fi
 	out := captureStdout(t, func() {
 		app := &AppContext{
 			Config: config.Defaults(),
+			Git:    gitRepo,
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -367,10 +377,35 @@ fi
 		t.Fatalf("expected success output, got:\n%s", out)
 	}
 
-	log := readTestFile(t, logPath)
+	log := shellCallsLog(fixRun)
 	if !strings.Contains(log, "commit --amend") {
 		t.Fatalf("expected amend in git log:\n%s", log)
 	}
+}
+
+func newFixGitRunner(t *testing.T, headSHA, commitMsg string, amend bool) *shelltest.Fake {
+	t.Helper()
+	responses := []shelltest.Response{
+		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "rebase-merge")},
+		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "rebase-apply")},
+		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "MERGE_HEAD")},
+		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "sequencer/todo")},
+		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "CHERRY_PICK_HEAD")},
+		{
+			Match:  shelltest.Exact("git", "rev-parse", "--verify", "HEAD"),
+			Stdout: headSHA + "\n",
+		},
+		{
+			Match:  shelltest.Exact("git", "log", "-1", "--pretty=%B"),
+			Stdout: commitMsg + "\n",
+		},
+	}
+	if amend {
+		responses = append(responses, shelltest.Response{
+			Match: shelltest.Exact("git", "commit", "--amend", "-F", "-"),
+		})
+	}
+	return shelltest.New(t, responses...)
 }
 
 func TestBuildFixedMessageAppendsMetadata(t *testing.T) {

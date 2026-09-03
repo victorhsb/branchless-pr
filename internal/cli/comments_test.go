@@ -19,11 +19,17 @@ func TestCommentsCmdExposesFlags(t *testing.T) {
 }
 
 func TestRootCleanCheckExemptsComments(t *testing.T) {
-	data, err := os.ReadFile("root.go")
+	rootData, err := os.ReadFile("root.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(data), `invocation.PolicyFor`) || !strings.Contains(string(data), `!policy.AllowsDirty`) {
+	bootstrapData, err := os.ReadFile("../invocation/bootstrap.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rootData), `invocation.PolicyFor`) ||
+		!strings.Contains(string(rootData), `Policy:       policy`) ||
+		!strings.Contains(string(bootstrapData), `!opts.Policy.AllowsDirty`) {
 		t.Fatal("root clean check does not use invocation policy")
 	}
 }

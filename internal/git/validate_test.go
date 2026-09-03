@@ -1,6 +1,10 @@
 package git
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
+)
 
 func TestValidateRemoteNameRejectsInjection(t *testing.T) {
 	cases := []struct {
@@ -75,43 +79,45 @@ func TestValidateRefNameRejectsInjection(t *testing.T) {
 // argument vector, regardless of the `--` terminators they also pass.
 func TestRemoteWrappersRejectHostileRemote(t *testing.T) {
 	const hostile = "--upload-pack=touch /tmp/pwned"
+	repo := New("", shelltest.New(t))
 
-	if err := Fetch(hostile); err == nil {
+	if err := repo.Fetch(hostile); err == nil {
 		t.Error("Fetch accepted a hostile remote")
 	}
-	if err := ForcePush(hostile, "foo"); err == nil {
+	if err := repo.ForcePush(hostile, "foo"); err == nil {
 		t.Error("ForcePush accepted a hostile remote")
 	}
-	if _, err := ResolveRemoteRefs(hostile, "foo"); err == nil {
+	if _, err := repo.ResolveRemoteRefs(hostile, "foo"); err == nil {
 		t.Error("ResolveRemoteRefs accepted a hostile remote")
 	}
-	if err := ForcePushWithLease(hostile, nil, "foo"); err == nil {
+	if err := repo.ForcePushWithLease(hostile, nil, "foo"); err == nil {
 		t.Error("ForcePushWithLease accepted a hostile remote")
 	}
-	if err := DeleteRemoteBranches(hostile, "foo"); err == nil {
+	if err := repo.DeleteRemoteBranches(hostile, "foo"); err == nil {
 		t.Error("DeleteRemoteBranches accepted a hostile remote")
 	}
-	if _, _, err := RepoSlug(hostile); err == nil {
+	if _, _, err := repo.RepoSlug(hostile); err == nil {
 		t.Error("RepoSlug accepted a hostile remote")
 	}
-	if err := TargetExists(hostile, "main"); err == nil {
+	if err := repo.TargetExists(hostile, "main"); err == nil {
 		t.Error("TargetExists accepted a hostile remote")
 	}
-	if err := TargetExists("origin", "--upload-pack=touch /tmp/pwned"); err == nil {
+	if err := repo.TargetExists("origin", "--upload-pack=touch /tmp/pwned"); err == nil {
 		t.Error("TargetExists accepted a hostile target")
 	}
 }
 
 func TestRemoteWrappersRejectHostileBranchName(t *testing.T) {
 	const hostile = "--upload-pack=touch /tmp/pwned"
+	repo := New("", shelltest.New(t))
 
-	if err := ForcePush("origin", hostile); err == nil {
+	if err := repo.ForcePush("origin", hostile); err == nil {
 		t.Error("ForcePush accepted a hostile branch name")
 	}
-	if err := DeleteRemoteBranches("origin", hostile); err == nil {
+	if err := repo.DeleteRemoteBranches("origin", hostile); err == nil {
 		t.Error("DeleteRemoteBranches accepted a hostile branch name")
 	}
-	if err := ForcePushWithLease("origin", nil, hostile); err == nil {
+	if err := repo.ForcePushWithLease("origin", nil, hostile); err == nil {
 		t.Error("ForcePushWithLease accepted a hostile branch name")
 	}
 }

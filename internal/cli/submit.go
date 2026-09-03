@@ -103,7 +103,7 @@ func submitImpl(app *AppContext, opts submitOptions) (err error) {
 		for i, e := range st {
 			heads[i] = e.Head()
 		}
-		leases, err = git.ResolveRemoteRefs(app.Args.Remote, heads...)
+		leases, err = app.Git.ResolveRemoteRefs(app.Args.Remote, heads...)
 		if err != nil {
 			return fmt.Errorf("cannot capture remote branch heads for native push lease: %w", err)
 		}
@@ -190,7 +190,7 @@ func useExperimentalSubmitEngine(app *AppContext) bool {
 }
 
 func validateSubmitPreconditions(app *AppContext, opts submitOptions) error {
-	if git.IsRebaseInProgress() {
+	if app.Git.IsRebaseInProgress() {
 		return fmt.Errorf("ERROR: Rebase in progress. Finish or abort it before submitting")
 	}
 	if !opts.DryRun {
@@ -227,7 +227,7 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 		return nil, nil, nil, nil
 	}
 
-	if err := git.Fetch(app.Args.Remote); err != nil {
+	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return nil, nil, nil, err
 	}
 	tmpl := stack.ParseTemplate(app.Args.BranchNameTemplate)
@@ -241,13 +241,13 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 }
 
 func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string, nativeStackedPRs map[int]bool) error {
-	if err := initializeStackBranches(st); err != nil {
+	if err := initializeStackBranches(app.Git, st); err != nil {
 		return err
 	}
 
 	needsBranchRebase := false
 	if top := st.Top(); top != nil {
-		needsBranchRebase, _ = git.IsAncestor(top.Head(), app.OrigBranch)
+		needsBranchRebase, _ = app.Git.IsAncestor(top.Head(), app.OrigBranch)
 	}
 
 	tmpDraftPRs, err := tempDraftAndResetBases(st, app.Args.Target, nativeStackedPRs)
@@ -259,7 +259,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	for i, e := range st {
 		heads[i] = e.Head()
 	}
-	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
+	if err := pushWithLeases(app.Git, app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push branches: %w", err)
 	}
 
@@ -291,11 +291,11 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	st.PrintStack(app.Args.Hyperlinks, true)
 	fmt.Println()
 
-	if err := amendCommitMetadata(st, needsMeta); err != nil {
+	if err := amendCommitMetadata(app.Git, st, needsMeta); err != nil {
 		return err
 	}
 
-	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
+	if err := pushWithLeases(app.Git, app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push amended branches: %w", err)
 	}
 
@@ -331,16 +331,16 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 	}
 
 	if needsBranchRebase {
-		if err := git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
+		if err := app.Git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase original branch: %w", err)
 		}
 	} else {
-		if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+		if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 		}
 	}
 
-	git.DeleteLocalBranches(heads...)
+	app.Git.DeleteLocalBranches(heads...)
 
 	if app.Args.ShowTips {
 		printSubmitTips(st)
@@ -350,13 +350,13 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 }
 
 func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, opts submitOptions, leases map[string]string, nativeStackedPRs map[int]bool) error {
-	if err := initializeStackBranches(st); err != nil {
+	if err := initializeStackBranches(app.Git, st); err != nil {
 		return err
 	}
 
 	needsBranchRebase := false
 	if top := st.Top(); top != nil {
-		needsBranchRebase, _ = git.IsAncestor(top.Head(), app.OrigBranch)
+		needsBranchRebase, _ = app.Git.IsAncestor(top.Head(), app.OrigBranch)
 	}
 
 	cache, err := newSubmitPRStateCache(st)
@@ -372,7 +372,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	for i, e := range st {
 		heads[i] = e.Head()
 	}
-	if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
+	if err := pushWithLeases(app.Git, app.Args.Remote, heads, leases); err != nil {
 		return fmt.Errorf("ERROR: Cannot push branches: %w", err)
 	}
 
@@ -415,12 +415,12 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	st.PrintStack(app.Args.Hyperlinks, true)
 	fmt.Println()
 
-	changedTips, err := amendCommitMetadataChanged(st, needsMeta)
+	changedTips, err := amendCommitMetadataChanged(app.Git, st, needsMeta)
 	if err != nil {
 		return err
 	}
 	if changedTips {
-		if err := pushWithLeases(app.Args.Remote, heads, leases); err != nil {
+		if err := pushWithLeases(app.Git, app.Args.Remote, heads, leases); err != nil {
 			return fmt.Errorf("ERROR: Cannot push amended branches: %w", err)
 		}
 	}
@@ -467,16 +467,16 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	}
 
 	if needsBranchRebase {
-		if err := git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
+		if err := app.Git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase original branch: %w", err)
 		}
 	} else {
-		if err := git.CheckoutBranch(app.OrigBranch); err != nil {
+		if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 		}
 	}
 
-	git.DeleteLocalBranches(heads...)
+	app.Git.DeleteLocalBranches(heads...)
 
 	if app.Args.ShowTips {
 		printSubmitTips(st)
@@ -485,9 +485,9 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	return nil
 }
 
-func initializeStackBranches(st stack.Stack) error {
+func initializeStackBranches(repo *git.Repo, st stack.Stack) error {
 	for _, e := range st {
-		if err := git.ForceUpdateBranch(e.Head(), e.Commit.SHA); err != nil {
+		if err := repo.ForceUpdateBranch(e.Head(), e.Commit.SHA); err != nil {
 			return err
 		}
 	}
@@ -564,31 +564,31 @@ func submitPREditNeeded(info *pr.Info, title, base string, body []byte) bool {
 	return info.Title != title || info.Body != string(body) || info.BaseRefName != base
 }
 
-func amendCommitMetadata(st stack.Stack, needsMeta []bool) error {
-	_, err := amendCommitMetadataChanged(st, needsMeta)
+func amendCommitMetadata(repo *git.Repo, st stack.Stack, needsMeta []bool) error {
+	_, err := amendCommitMetadataChanged(repo, st, needsMeta)
 	return err
 }
 
-func amendCommitMetadataChanged(st stack.Stack, needsMeta []bool) (bool, error) {
+func amendCommitMetadataChanged(repo *git.Repo, st stack.Stack, needsMeta []bool) (bool, error) {
 	metaModified := false
 	for i, e := range st {
 		if needsMeta[i] {
 			if !metaModified {
-				if err := git.CheckoutBranch(e.Head()); err != nil {
+				if err := repo.CheckoutBranch(e.Head()); err != nil {
 					return false, err
 				}
 			} else {
-				if err := git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
+				if err := repo.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
 					return false, err
 				}
 			}
 			msg := []byte(e.Commit.CommitMsg() + e.MetadataLine())
-			if err := git.CommitAmend(msg); err != nil {
+			if err := repo.CommitAmend(msg); err != nil {
 				return false, fmt.Errorf("ERROR: Cannot update stack metadata: %w", err)
 			}
 			metaModified = true
 		} else if metaModified {
-			if err := git.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
+			if err := repo.RebaseWithAuthorDate(e.Base(), e.Head()); err != nil {
 				return false, err
 			}
 		}

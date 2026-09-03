@@ -4,6 +4,8 @@ import (
 	"os"
 	"regexp"
 	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 func TestPrimaryCommandsDoNotPrintBannersOrSuccessMarkers(t *testing.T) {
@@ -32,7 +34,7 @@ func TestPrimaryCommandsDoNotPrintBannersOrSuccessMarkers(t *testing.T) {
 }
 
 func TestRootCommandSilencesCobraErrorPreambles(t *testing.T) {
-	cmd, err := newRootCommand("stack-pr", []string{"view"})
+	cmd, err := newRootCommand("stack-pr", []string{"view"}, shell.Default{})
 	if err != nil {
 		t.Fatalf("newRootCommand: %v", err)
 	}

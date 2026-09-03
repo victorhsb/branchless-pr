@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/victorhsb/branchless-pr/internal/git"
 )
 
 // Default path inside the repo for the config file.
@@ -21,18 +19,17 @@ type Config struct {
 	path     string
 }
 
-// FilePath returns the effective config file path.
+// FilePath returns the effective config file path for repoRoot.
 // 1. $STACKPR_CONFIG if set.
 // 2. <repo-root>/.stack-pr.cfg otherwise.
-func FilePath() (string, error) {
+func FilePath(repoRoot string) (string, error) {
 	if p := os.Getenv("STACKPR_CONFIG"); p != "" {
 		return p, nil
 	}
-	root, err := git.RepoRoot()
-	if err != nil {
-		return "", err
+	if repoRoot == "" {
+		return "", fmt.Errorf("repository root is required when STACKPR_CONFIG is not set")
 	}
-	return filepath.Join(root, DefaultFilename), nil
+	return filepath.Join(repoRoot, DefaultFilename), nil
 }
 
 // Load reads the config file at path, or returns an empty Config if it does

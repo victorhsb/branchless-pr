@@ -21,11 +21,11 @@ type nativeStackSubmitClient interface {
 
 // pushWithLeases pushes branches using force-with-lease when leases are
 // provided, otherwise falls back to a plain force push.
-func pushWithLeases(remote string, heads []string, leases map[string]string) error {
+func pushWithLeases(repo *git.Repo, remote string, heads []string, leases map[string]string) error {
 	if len(leases) == 0 {
-		return git.ForcePush(remote, heads...)
+		return repo.ForcePush(remote, heads...)
 	}
-	return git.ForcePushWithLease(remote, leases, heads...)
+	return repo.ForcePushWithLease(remote, leases, heads...)
 }
 
 // effectiveReceiptDestination resolves the receipt destination from the flag or
@@ -82,7 +82,7 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 		return &nativePreflightResult{enabled: false}, nil
 	}
 
-	owner, repo, err := git.RepoSlug(app.Args.Remote)
+	owner, repo, err := app.Git.RepoSlug(app.Args.Remote)
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve owner/repo for native submit: %w", err)
 	}

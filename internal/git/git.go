@@ -12,6 +12,32 @@ import (
 
 var lowerHex = "0123456789abcdef"
 
+// Repo runs Git commands in one working directory through an injectable runner.
+// An empty Dir uses the process working directory.
+type Repo struct {
+	Dir string
+	run shell.Runner
+}
+
+// New returns a Git repository command boundary.
+func New(dir string, run shell.Runner) *Repo {
+	return &Repo{Dir: dir, run: run}
+}
+
+func (r *Repo) runner() shell.Runner {
+	if r == nil || r.run == nil {
+		return shell.Default{}
+	}
+	return r.run
+}
+
+func (r *Repo) opts(opts shell.RunOpts) shell.RunOpts {
+	if r != nil {
+		opts.Dir = r.Dir
+	}
+	return opts
+}
+
 // IsFullSHA reports whether s is exactly 40 lowercase hexadecimal characters.
 func IsFullSHA(s string) bool {
 	if len(s) != SHALength {
@@ -26,13 +52,10 @@ func IsFullSHA(s string) bool {
 }
 
 // BranchExists reports whether a local branch exists.
-func BranchExists(branch string, repoDir ...string) (bool, error) {
+func (r *Repo) BranchExists(branch string) (bool, error) {
 	args := []string{"git", "show-ref", "-q", "refs/heads/" + branch}
-	opts := shell.RunOpts{Quiet: true, Check: false}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	_, _, err := shell.Run(args, opts)
+	opts := r.opts(shell.RunOpts{Quiet: true, Check: false})
+	_, _, err := r.runner().Run(args, opts)
 	if err == nil {
 		return true, nil
 	}
@@ -43,13 +66,9 @@ func BranchExists(branch string, repoDir ...string) (bool, error) {
 }
 
 // CurrentBranchName returns the name of the current branch.
-func CurrentBranchName(repoDir ...string) (string, error) {
+func (r *Repo) CurrentBranchName() (string, error) {
 	args := []string{"git", "rev-parse", "--abbrev-ref", "HEAD"}
-	opts := shell.RunOpts{}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	out, err := shell.Output(args, opts)
+	out, err := r.runner().Output(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == NotARepo {
 			return "", &Error{Op: "current_branch_name", Err: exitErr}
@@ -60,13 +79,9 @@ func CurrentBranchName(repoDir ...string) (string, error) {
 }
 
 // RepoRoot returns the absolute path of the repository root.
-func RepoRoot(repoDir ...string) (string, error) {
+func (r *Repo) RepoRoot() (string, error) {
 	args := []string{"git", "rev-parse", "--show-toplevel"}
-	opts := shell.RunOpts{}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	out, err := shell.Output(args, opts)
+	out, err := r.runner().Output(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == NotARepo {
 			return "", &Error{Op: "repo_root", Err: exitErr}
@@ -78,13 +93,9 @@ func RepoRoot(repoDir ...string) (string, error) {
 
 // UncommittedChanges parses `git status --porcelain` and returns a map keyed
 // by the first two status characters, with values from column 4 onward.
-func UncommittedChanges(repoDir ...string) (map[string]string, error) {
+func (r *Repo) UncommittedChanges() (map[string]string, error) {
 	args := []string{"git", "status", "--porcelain"}
-	opts := shell.RunOpts{}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	out, err := shell.Output(args, opts)
+	out, err := r.runner().Output(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return nil, &Error{Op: "uncommitted_changes", Err: err}
 	}
@@ -101,8 +112,8 @@ func UncommittedChanges(repoDir ...string) (map[string]string, error) {
 }
 
 // CheckGHInstalled verifies that `gh` is on PATH.
-func CheckGHInstalled() error {
-	_, err := shell.Output([]string{"gh"}, shell.RunOpts{})
+func (r *Repo) CheckGHInstalled() error {
+	_, err := r.runner().Output([]string{"gh"}, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return &Error{
 			Op:  "check_gh_installed",
@@ -115,11 +126,14 @@ func CheckGHInstalled() error {
 var loginRe = regexp.MustCompile(`"login"\s*:\s*"([^"]+)"`)
 
 // GetGHUsername returns the current GitHub login name.
-func GetGHUsername() (string, error) {
+func (r *Repo) GetGHUsername() (string, error) {
 	if u := gitConfig.UsernameOverride(); u != nil {
 		return *u, nil
 	}
-	out, err := shell.Output([]string{"gh", "api", "graphql", "-f", "query=query{viewer{login}}"}, shell.RunOpts{})
+	out, err := r.runner().Output(
+		[]string{"gh", "api", "graphql", "-f", "query=query{viewer{login}}"},
+		r.opts(shell.RunOpts{}),
+	)
 	if err != nil {
 		return "", &Error{Op: "get_gh_username", Err: err}
 	}
@@ -131,9 +145,9 @@ func GetGHUsername() (string, error) {
 }
 
 // IsRebaseInProgress reports whether a rebase is currently active.
-func IsRebaseInProgress(repoDir ...string) bool {
+func (r *Repo) IsRebaseInProgress() bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		if operationPathExists(name, repoDir...) {
+		if r.operationPathExists(name) {
 			return true
 		}
 	}
@@ -143,12 +157,9 @@ func IsRebaseInProgress(repoDir ...string) bool {
 // operationPathExists asks Git to resolve an operation marker in the supplied
 // repository context. Git owns this mapping because metadata may live outside
 // a worktree's .git path (for example in linked worktrees or submodules).
-func operationPathExists(marker string, repoDir ...string) bool {
-	opts := shell.RunOpts{Quiet: true}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	path, err := shell.Output([]string{"git", "rev-parse", "--git-path", marker}, opts)
+func (r *Repo) operationPathExists(marker string) bool {
+	opts := r.opts(shell.RunOpts{Quiet: true})
+	path, err := r.runner().Output([]string{"git", "rev-parse", "--git-path", marker}, opts)
 	if err != nil || path == "" {
 		return false
 	}
@@ -160,8 +171,11 @@ func operationPathExists(marker string, repoDir ...string) bool {
 }
 
 // MergeBase returns the common ancestor of a and b.
-func MergeBase(a, b string) (string, error) {
-	out, err := shell.Output([]string{"git", "merge-base", a, b}, shell.RunOpts{})
+func (r *Repo) MergeBase(a, b string) (string, error) {
+	out, err := r.runner().Output(
+		[]string{"git", "merge-base", a, b},
+		r.opts(shell.RunOpts{}),
+	)
 	if err != nil {
 		return "", &Error{Op: "merge_base", Err: err}
 	}
@@ -171,12 +185,9 @@ func MergeBase(a, b string) (string, error) {
 // BranchlessStackHead returns the top commit in the current git-branchless
 // stack. The boolean is false when git-branchless is unavailable, the repo is
 // not initialized for branchless, or the command returns no valid commits.
-func BranchlessStackHead(repoDir ...string) (string, bool) {
-	opts := shell.RunOpts{Quiet: true, Check: false}
-	if len(repoDir) > 0 && repoDir[0] != "" {
-		opts.Dir = repoDir[0]
-	}
-	out, _, err := shell.Run([]string{"git", "branchless", "query", "-r", "stack()"}, opts)
+func (r *Repo) BranchlessStackHead() (string, bool) {
+	opts := r.opts(shell.RunOpts{Quiet: true, Check: false})
+	out, _, err := r.runner().Run([]string{"git", "branchless", "query", "-r", "stack()"}, opts)
 	if err != nil {
 		return "", false
 	}
@@ -199,10 +210,10 @@ func BranchlessStackHead(repoDir ...string) (string, bool) {
 }
 
 // IsAncestor reports whether a is an ancestor of b.
-func IsAncestor(a, b string) (bool, error) {
-	_, _, err := shell.Run(
+func (r *Repo) IsAncestor(a, b string) (bool, error) {
+	_, _, err := r.runner().Run(
 		[]string{"git", "merge-base", "--is-ancestor", a, b},
-		shell.RunOpts{Quiet: true, Check: false},
+		r.opts(shell.RunOpts{Quiet: true, Check: false}),
 	)
 	if err == nil {
 		return true, nil
@@ -214,11 +225,14 @@ func IsAncestor(a, b string) (bool, error) {
 }
 
 // Fetch runs git fetch --prune on the given remote.
-func Fetch(remote string) error {
+func (r *Repo) Fetch(remote string) error {
 	if err := ValidateRemoteName(remote); err != nil {
 		return &Error{Op: "fetch", Err: err}
 	}
-	_, err := shell.Output([]string{"git", "fetch", "--prune", "--", remote}, shell.RunOpts{})
+	_, err := r.runner().Output(
+		[]string{"git", "fetch", "--prune", "--", remote},
+		r.opts(shell.RunOpts{}),
+	)
 	if err != nil {
 		return &Error{Op: "fetch", Err: err}
 	}
@@ -226,10 +240,10 @@ func Fetch(remote string) error {
 }
 
 // Checkout creates or resets branch from startPoint.
-func Checkout(startPoint, branch string) error {
-	_, _, err := shell.Run(
+func (r *Repo) Checkout(startPoint, branch string) error {
+	_, _, err := r.runner().Run(
 		[]string{"git", "checkout", startPoint, "-B", branch},
-		shell.RunOpts{},
+		r.opts(shell.RunOpts{}),
 	)
 	if err != nil {
 		return &Error{Op: "checkout", Err: err}
@@ -238,14 +252,14 @@ func Checkout(startPoint, branch string) error {
 }
 
 // ForceUpdateBranch creates or resets branch from startPoint without switching the worktree.
-func ForceUpdateBranch(branch, startPoint string) error {
-	current, currentErr := CurrentBranchName()
+func (r *Repo) ForceUpdateBranch(branch, startPoint string) error {
+	current, currentErr := r.CurrentBranchName()
 	if currentErr == nil && current == branch {
-		currentSHA, err := RevParse("HEAD")
+		currentSHA, err := r.RevParse("HEAD")
 		if err != nil {
 			return &Error{Op: "force_update_branch", Err: err}
 		}
-		targetSHA, err := RevParse(startPoint)
+		targetSHA, err := r.RevParse(startPoint)
 		if err != nil {
 			return &Error{Op: "force_update_branch", Err: err}
 		}
@@ -262,9 +276,9 @@ func ForceUpdateBranch(branch, startPoint string) error {
 			),
 		}
 	}
-	_, _, err := shell.Run(
+	_, _, err := r.runner().Run(
 		[]string{"git", "branch", "-f", branch, startPoint},
-		shell.RunOpts{},
+		r.opts(shell.RunOpts{}),
 	)
 	if err != nil {
 		return &Error{Op: "force_update_branch", Err: err}
@@ -273,10 +287,10 @@ func ForceUpdateBranch(branch, startPoint string) error {
 }
 
 // CheckoutBranch switches to branch without -B (used for post-op restore).
-func CheckoutBranch(branch string) error {
-	_, _, err := shell.Run(
+func (r *Repo) CheckoutBranch(branch string) error {
+	_, _, err := r.runner().Run(
 		[]string{"git", "checkout", branch},
-		shell.RunOpts{},
+		r.opts(shell.RunOpts{}),
 	)
 	if err != nil {
 		return &Error{Op: "checkout_branch", Err: err}
@@ -285,7 +299,7 @@ func CheckoutBranch(branch string) error {
 }
 
 // ForcePush force-pushes local branches to remote (ref:ref format).
-func ForcePush(remote string, refs ...string) error {
+func (r *Repo) ForcePush(remote string, refs ...string) error {
 	if err := validateRemoteAndRefs("force_push", remote, refs); err != nil {
 		return err
 	}
@@ -293,7 +307,7 @@ func ForcePush(remote string, refs ...string) error {
 	for _, r := range refs {
 		args = append(args, r+":"+r)
 	}
-	_, _, err := shell.Run(args, shell.RunOpts{})
+	_, _, err := r.runner().Run(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return &Error{Op: "force_push", Err: err}
 	}
@@ -302,7 +316,7 @@ func ForcePush(remote string, refs ...string) error {
 
 // ResolveRemoteRefs reads current branch OIDs from the remote itself. Missing
 // refs are omitted from the result.
-func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error) {
+func (r *Repo) ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error) {
 	if err := validateRemoteAndRefs("resolve_remote_refs", remote, refs); err != nil {
 		return nil, err
 	}
@@ -311,7 +325,7 @@ func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error)
 	for _, r := range refs {
 		args = append(args, "refs/heads/"+r)
 	}
-	out, err := shell.Output(args, shell.RunOpts{Quiet: true})
+	out, err := r.runner().Output(args, r.opts(shell.RunOpts{Quiet: true}))
 	if err != nil {
 		return nil, &Error{Op: "resolve_remote_refs", Err: err}
 	}
@@ -333,7 +347,7 @@ func ResolveRemoteRefs(remote string, refs ...string) (map[string]string, error)
 // the branch must not exist. It uses the --force-with-lease=<ref>:<expect>
 // option form (supported since git 2.0) rather than the refspec ^ notation
 // (introduced in git 2.44) for broad compatibility.
-func ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
+func (r *Repo) ForcePushWithLease(remote string, leases map[string]string, refs ...string) error {
 	if err := validateRemoteAndRefs("force_push_with_lease", remote, refs); err != nil {
 		return err
 	}
@@ -346,7 +360,7 @@ func ForcePushWithLease(remote string, leases map[string]string, refs ...string)
 	for _, r := range refs {
 		args = append(args, r+":refs/heads/"+r)
 	}
-	_, _, err := shell.Run(args, shell.RunOpts{})
+	_, _, err := r.runner().Run(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return &Error{Op: "force_push_with_lease", Err: err}
 	}
@@ -354,7 +368,7 @@ func ForcePushWithLease(remote string, leases map[string]string, refs ...string)
 }
 
 // DeleteRemoteBranches deletes branches on the remote via empty ref.
-func DeleteRemoteBranches(remote string, branches ...string) error {
+func (r *Repo) DeleteRemoteBranches(remote string, branches ...string) error {
 	if err := validateRemoteAndRefs("delete_remote_branches", remote, branches); err != nil {
 		return err
 	}
@@ -362,7 +376,7 @@ func DeleteRemoteBranches(remote string, branches ...string) error {
 	for _, b := range branches {
 		args = append(args, ":"+b)
 	}
-	_, _, err := shell.Run(args, shell.RunOpts{})
+	_, _, err := r.runner().Run(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return &Error{Op: "delete_remote_branches", Err: err}
 	}
@@ -370,24 +384,24 @@ func DeleteRemoteBranches(remote string, branches ...string) error {
 }
 
 // DeleteLocalBranches deletes local branches (best-effort, ignores failure).
-func DeleteLocalBranches(branches ...string) {
+func (r *Repo) DeleteLocalBranches(branches ...string) {
 	if len(branches) == 0 {
 		return
 	}
 	args := append([]string{"git", "branch", "-D"}, branches...)
-	_, _ = shell.Output(args, shell.RunOpts{Quiet: true, Check: false})
+	_, _ = r.runner().Output(args, r.opts(shell.RunOpts{Quiet: true, Check: false}))
 }
 
 // Rebase runs git rebase with optional extra args between onto/upstream.
 // If branch is empty it rebases the current branch.
-func Rebase(onto, branch string, extras ...string) error {
+func (r *Repo) Rebase(onto, branch string, extras ...string) error {
 	args := []string{"git", "rebase"}
 	args = append(args, extras...)
 	args = append(args, onto)
 	if branch != "" {
 		args = append(args, branch)
 	}
-	_, _, err := shell.Run(args, shell.RunOpts{})
+	_, _, err := r.runner().Run(args, r.opts(shell.RunOpts{}))
 	if err != nil {
 		return &Error{Op: "rebase", Err: err}
 	}
@@ -395,8 +409,8 @@ func Rebase(onto, branch string, extras ...string) error {
 }
 
 // RebaseWithAuthorDate is like Rebase but with --committer-date-is-author-date.
-func RebaseWithAuthorDate(onto, branch string) error {
-	return Rebase(onto, branch, "--committer-date-is-author-date")
+func (r *Repo) RebaseWithAuthorDate(onto, branch string) error {
+	return r.Rebase(onto, branch, "--committer-date-is-author-date")
 }
 
 // StashRef identifies one exact stash commit. Its zero value means that no
@@ -411,22 +425,22 @@ func (s StashRef) IsZero() bool { return s.OID == "" }
 // StashSave stashes tracked changes with an optional message and returns the
 // exact created stash identity. Creation is detected from refs/stash rather
 // than localized command output.
-func StashSave(msg string) (StashRef, error) {
+func (r *Repo) StashSave(msg string) (StashRef, error) {
 	if msg == "" {
 		msg = "stack-pr auto-stash"
 	}
-	before, err := stashHead()
+	before, err := r.stashHead()
 	if err != nil {
 		return StashRef{}, err
 	}
-	_, _, err = shell.Run(
+	_, _, err = r.runner().Run(
 		[]string{"git", "stash", "push", "-m", msg},
-		shell.RunOpts{Quiet: true},
+		r.opts(shell.RunOpts{Quiet: true}),
 	)
 	if err != nil {
 		return StashRef{}, &Error{Op: "stash_save", Err: err}
 	}
-	after, err := stashHead()
+	after, err := r.stashHead()
 	if err != nil {
 		return StashRef{}, err
 	}
@@ -441,16 +455,16 @@ func StashSave(msg string) (StashRef, error) {
 
 // StashRestore applies one exact stash commit and drops only its matching
 // reflog entry. Apply failures leave the stash available for manual recovery.
-func StashRestore(ref StashRef) error {
+func (r *Repo) StashRestore(ref StashRef) error {
 	if ref.IsZero() {
 		return nil
 	}
-	if _, err := stashSelector(ref); err != nil {
+	if _, err := r.stashSelector(ref); err != nil {
 		return err
 	}
-	_, _, err := shell.Run(
+	_, _, err := r.runner().Run(
 		[]string{"git", "stash", "apply", "--quiet", ref.OID},
-		shell.RunOpts{Quiet: true},
+		r.opts(shell.RunOpts{Quiet: true}),
 	)
 	if err != nil {
 		return &Error{
@@ -458,16 +472,16 @@ func StashRestore(ref StashRef) error {
 			Err: fmt.Errorf("automatic stash %s could not be applied and was kept for manual recovery: %w", ref.OID, err),
 		}
 	}
-	selector, err := stashSelector(ref)
+	selector, err := r.stashSelector(ref)
 	if err != nil {
 		return &Error{
 			Op:  "stash_drop",
 			Err: fmt.Errorf("automatic stash %s was applied but its reflog entry could not be found for removal: %w", ref.OID, err),
 		}
 	}
-	_, _, err = shell.Run(
+	_, _, err = r.runner().Run(
 		[]string{"git", "stash", "drop", "--quiet", selector},
-		shell.RunOpts{Quiet: true},
+		r.opts(shell.RunOpts{Quiet: true}),
 	)
 	if err != nil {
 		return &Error{
@@ -478,10 +492,10 @@ func StashRestore(ref StashRef) error {
 	return nil
 }
 
-func stashHead() (string, error) {
-	out, _, err := shell.Run(
+func (r *Repo) stashHead() (string, error) {
+	out, _, err := r.runner().Run(
 		[]string{"git", "rev-parse", "--verify", "--quiet", "refs/stash^{commit}"},
-		shell.RunOpts{Quiet: true},
+		r.opts(shell.RunOpts{Quiet: true}),
 	)
 	if err == nil {
 		return strings.TrimSpace(string(out)), nil
@@ -492,10 +506,10 @@ func stashHead() (string, error) {
 	return "", &Error{Op: "stash_ref", Err: err}
 }
 
-func stashSelector(ref StashRef) (string, error) {
-	out, err := shell.Output(
+func (r *Repo) stashSelector(ref StashRef) (string, error) {
+	out, err := r.runner().Output(
 		[]string{"git", "stash", "list", "--format=%H%x00%gd"},
-		shell.RunOpts{},
+		r.opts(shell.RunOpts{}),
 	)
 	if err != nil {
 		return "", &Error{Op: "stash_list", Err: err}
@@ -513,8 +527,11 @@ func stashSelector(ref StashRef) (string, error) {
 }
 
 // RevParse resolves a ref to its full 40-char SHA.
-func RevParse(ref string) (string, error) {
-	out, err := shell.Output([]string{"git", "rev-parse", "--verify", ref}, shell.RunOpts{})
+func (r *Repo) RevParse(ref string) (string, error) {
+	out, err := r.runner().Output(
+		[]string{"git", "rev-parse", "--verify", ref},
+		r.opts(shell.RunOpts{}),
+	)
 	if err != nil {
 		return "", &Error{Op: "rev_parse", Err: err}
 	}
@@ -522,10 +539,10 @@ func RevParse(ref string) (string, error) {
 }
 
 // CommitAmend amends HEAD with a new message from stdin.
-func CommitAmend(msg []byte) error {
-	_, _, err := shell.Run(
+func (r *Repo) CommitAmend(msg []byte) error {
+	_, _, err := r.runner().Run(
 		[]string{"git", "commit", "--amend", "-F", "-"},
-		shell.RunOpts{Stdin: msg},
+		r.opts(shell.RunOpts{Stdin: msg}),
 	)
 	if err != nil {
 		return &Error{Op: "commit_amend", Err: err}
@@ -537,11 +554,14 @@ func CommitAmend(msg []byte) error {
 // URL reported by `git remote get-url <remote>`. It accepts both HTTPS
 // (`https://github.com/owner/repo[.git]`) and SSH (`git@github.com:owner/repo[.git]`)
 // forms.
-func RepoSlug(remote string) (owner, repo string, err error) {
+func (r *Repo) RepoSlug(remote string) (owner, repo string, err error) {
 	if err := ValidateRemoteName(remote); err != nil {
 		return "", "", err
 	}
-	url, err := shell.Output([]string{"git", "remote", "get-url", "--", remote}, shell.RunOpts{Quiet: true})
+	url, err := r.runner().Output(
+		[]string{"git", "remote", "get-url", "--", remote},
+		r.opts(shell.RunOpts{Quiet: true}),
+	)
 	if err != nil {
 		return "", "", &Error{Op: "repo_slug", Err: err}
 	}
@@ -593,14 +613,14 @@ func parseRepoSlug(url string) (owner, repo string, err error) {
 }
 
 // IsMergeInProgress reports whether a merge is currently active.
-func IsMergeInProgress(repoDir ...string) bool {
-	return operationPathExists("MERGE_HEAD", repoDir...)
+func (r *Repo) IsMergeInProgress() bool {
+	return r.operationPathExists("MERGE_HEAD")
 }
 
 // IsCherryPickInProgress reports whether a cherry-pick is currently active.
-func IsCherryPickInProgress(repoDir ...string) bool {
+func (r *Repo) IsCherryPickInProgress() bool {
 	for _, name := range []string{"sequencer/todo", "CHERRY_PICK_HEAD"} {
-		if operationPathExists(name, repoDir...) {
+		if r.operationPathExists(name) {
 			return true
 		}
 	}
@@ -608,19 +628,22 @@ func IsCherryPickInProgress(repoDir ...string) bool {
 }
 
 // AnySequencerInProgress reports whether any rebase, merge, or cherry-pick is active.
-func AnySequencerInProgress(repoDir ...string) bool {
-	return IsRebaseInProgress(repoDir...) || IsMergeInProgress(repoDir...) || IsCherryPickInProgress(repoDir...)
+func (r *Repo) AnySequencerInProgress() bool {
+	return r.IsRebaseInProgress() || r.IsMergeInProgress() || r.IsCherryPickInProgress()
 }
 
 // CommitMsg returns the current commit message for HEAD.
-func CommitMsg() (string, error) {
-	out, err := shell.Output([]string{"git", "log", "-1", "--pretty=%B"}, shell.RunOpts{})
+func (r *Repo) CommitMsg() (string, error) {
+	out, err := r.runner().Output(
+		[]string{"git", "log", "-1", "--pretty=%B"},
+		r.opts(shell.RunOpts{}),
+	)
 	if err != nil {
 		return "", &Error{Op: "commit_msg", Err: err}
 	}
 	return out, nil
 }
-func TargetExists(remote, target string) error {
+func (r *Repo) TargetExists(remote, target string) error {
 	if err := ValidateRemoteName(remote); err != nil {
 		return &Error{Op: "target_exists", Err: err}
 	}
@@ -630,9 +653,9 @@ func TargetExists(remote, target string) error {
 	// No `--` here: in rev-parse it separates revisions from paths, so it would
 	// make the ref be read as a pathname. Validation above keeps it positional.
 	ref := remote + "/" + target
-	_, err := shell.Output(
+	_, err := r.runner().Output(
 		[]string{"git", "rev-parse", "--verify", ref},
-		shell.RunOpts{Quiet: true, Check: false},
+		r.opts(shell.RunOpts{Quiet: true, Check: false}),
 	)
 	if err != nil {
 		if code, ok := shell.ExitCode(err); ok && (code == 128 || code == 1) {

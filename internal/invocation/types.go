@@ -24,6 +24,7 @@ type CommonArgs struct {
 type AppContext struct {
 	Config         *config.Config
 	Args           CommonArgs
+	Git            *git.Repo
 	RepoRoot       string
 	Username       string
 	OrigBranch     string
@@ -37,7 +38,7 @@ func (a *AppContext) RestoreStash() error {
 	if a == nil || a.AutomaticStash.IsZero() {
 		return nil
 	}
-	if err := git.StashRestore(a.AutomaticStash); err != nil {
+	if err := a.Git.StashRestore(a.AutomaticStash); err != nil {
 		return err
 	}
 	a.AutomaticStash = git.StashRef{}
@@ -126,8 +127,8 @@ func DefaultReviewer(cfg *config.Config, arg string) string {
 }
 
 // RequireCleanRepo exits with an error if the working tree has tracked changes.
-func RequireCleanRepo() error {
-	changes, err := git.UncommittedChanges()
+func RequireCleanRepo(repo *git.Repo) error {
+	changes, err := repo.UncommittedChanges()
 	if err != nil {
 		return err
 	}
@@ -149,7 +150,7 @@ func WithRecovery(app *AppContext, fn func() error) (err error) {
 			err = fmt.Errorf("panic: %v", r)
 		}
 		if err != nil {
-			_ = git.CheckoutBranch(app.OrigBranch)
+			_ = app.Git.CheckoutBranch(app.OrigBranch)
 			_ = app.RestoreStash()
 		}
 	}()

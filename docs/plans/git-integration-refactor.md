@@ -253,17 +253,19 @@ Rules for the conversion:
 
 **Composition root.** Extract the bootstrap work now in
 `PersistentPreRunE` (config load, repo discovery, gh-installed check, current
-branch, branchless-head detection, username, stash) into
-`invocation.Bootstrap(runner shell.Runner, args CommonArgs, ...) (*AppContext, error)`,
-so `root.go` shrinks to Cobra wiring and the init sequence is testable without
-a Cobra command.
+branch, branchless-head detection, username, stash) into a two-stage
+`invocation.Bootstrap`: `NewBootstrap(runner, agentOnly)` owns config loading
+and the repo discovery needed before Cobra registers the config-dependent
+`land` command, then `bootstrap.Start(options)` returns the command's
+`*AppContext` after flags are parsed. This keeps one discovery path, shrinks
+`root.go` to Cobra wiring, and makes the init sequence testable without a Cobra
+command.
 
 - `newRootCommand` takes a `shell.Runner`; production `Execute` passes
   `shell.Default{}`, tests pass one `shelltest.Fake`.
-- `config.FilePath` runs `git.RepoRoot()` *before* the pre-run hook, so
-  config-path resolution must also use the injected runner. Either move config
-  load into `Bootstrap` or give `config.FilePath` a `*git.Repo`. Prefer moving
-  it into `Bootstrap` so there is one discovery path.
+- `config.FilePath` no longer shells out; it receives the root discovered by
+  `Bootstrap`. Config-path resolution therefore uses the injected runner and
+  remains in the same discovery path as invocation initialization.
 - `AppContext` gains `Git *git.Repo`. `RepoRoot`/`CurrentBranchName` run on a
   bootstrap `git.New("", runner)` before the root is known; every later call
   uses the `AppContext.Git` built once the root resolves.
@@ -436,11 +438,12 @@ Expected output is files under `internal/git`, `internal/pr`,
 - [x] Commit 1 — `shell`: `Runner`, `Default`, portable `ExitCode`,
       `shelltest.Fake` (process-free); fix `Check` doc; `diagnose.DefaultRunner`
       delegates to `shell.Default`
-- [ ] Commit 2 — `git.Repo` receiver; drop `repoDir` variadics;
-      `invocation.Bootstrap(runner, ...)`; runner injected at `newRootCommand`;
+- [x] Commit 2 — `git.Repo` receiver; drop `repoDir` variadics;
+      two-stage `invocation.Bootstrap`; runner injected at `newRootCommand`;
       config-path resolution uses the injected runner; `AppContext.Git`;
       convert git-side `PATH` fakes + hybrid stash fault-injection cases to
-      `shelltest.Fake`; remove Windows skips; argv byte-identical
+      `shelltest.Fake`; remove Git-only Windows skips (the remaining skips use
+      `gh` scripts and leave in commit 3); argv byte-identical
 - [ ] Commit 3 — `pr.Client` single GitHub boundary: absorb `CheckGHInstalled`/
       `GetGHUsername` (delete `git/config.go` + username override) and
       `nativestacks` transport; migrate `stack/verify.go` and the four

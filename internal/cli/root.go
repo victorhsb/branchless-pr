@@ -2,16 +2,12 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/victorhsb/branchless-pr/internal/config"
-	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/invocation"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 var (
@@ -40,31 +36,21 @@ func Execute(progName string) error {
 	if len(os.Args) > 1 {
 		args = os.Args[1:]
 	}
-	root, err := newRootCommand(progName, args)
+	root, err := newRootCommand(progName, args, shell.Default{})
 	if err != nil {
 		return err
 	}
 	return root.Execute()
 }
 
-func newRootCommand(progName string, args []string) (*cobra.Command, error) {
+func newRootCommand(progName string, args []string, runner shell.Runner) (*cobra.Command, error) {
 	cobra.EnableCommandSorting = false
 
-	defaults := config.Defaults()
-	cfg := defaults
-	if !argsSelectAgent(args) {
-		// Pre-resolve config so subcommands can be conditionally added.
-		cfgPath, err := config.FilePath()
-		if err != nil {
-			return nil, fmt.Errorf("unable to locate repo root: %w", err)
-		}
-		loaded, err := config.Load(cfgPath)
-		if err != nil {
-			return nil, fmt.Errorf("unable to load config: %w", err)
-		}
-		loaded.Merge(defaults)
-		cfg = loaded
+	bootstrap, err := invocation.NewBootstrap(runner, argsSelectAgent(args))
+	if err != nil {
+		return nil, err
 	}
+	cfg := bootstrap.Config
 
 	root := &cobra.Command{
 		Use:           progName,
@@ -75,12 +61,13 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			policy := invocation.PolicyFor(cmd.Name(), commandInSubtree(cmd, "agent"), commandInSubtree(cmd, "config"))
 			if policy.AgentOnly {
-				cmd.SetContext(newContextFromApp(&AppContext{Config: cfg}))
+				app, err := bootstrap.Start(invocation.BootstrapOptions{Policy: policy})
+				if err != nil {
+					return err
+				}
+				cmd.SetContext(newContextFromApp(app))
 				return nil
 			}
-
-			// Merge defaults fresh so multiple invocations in tests work.
-			cfg.Merge(defaults)
 
 			// Resolve shared args
 			var hyperlinks *bool
@@ -104,119 +91,17 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 			headExplicit := cmd.Flags().Changed("head")
 
 			ca := ResolveSharedArgs(cfg, flagBase, flagHead, flagRemote, flagTarget, hyperlinks, verbose, flagBranchTemplate, showTips)
-
-			// Validate remote/target before any value reaches a git argument
-			// vector. These come from .stack-pr.cfg, which can be checked into
-			// a repository, and git parses a leading-dash positional as an
-			// option and accepts a transport URL wherever it takes a remote
-			// name. Read-only commands such as `view` reach the remote too.
-			if err := git.ValidateRemoteName(ca.Remote); err != nil {
-				return err
-			}
-			if err := git.ValidateRefName("target branch", ca.Target); err != nil {
-				return err
-			}
-
-			// Verbosity
-			if ca.Verbose {
-				slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			}
-
-			// Check gh
-			if err := git.CheckGHInstalled(); err != nil {
-				return err
-			}
-
-			// Repo root
-			repoRoot, err := git.RepoRoot()
+			dryRun, _ := cmd.Flags().GetBool("dry-run")
+			appCtx, err := bootstrap.Start(invocation.BootstrapOptions{
+				Args:         ca,
+				Policy:       policy,
+				HeadExplicit: headExplicit,
+				Stash:        flagStash,
+				DryRun:       dryRun,
+				Stderr:       cmd.ErrOrStderr(),
+			})
 			if err != nil {
 				return err
-			}
-
-			// Current branch
-			origBranch, err := git.CurrentBranchName()
-			if err != nil {
-				return err
-			}
-
-			// When running in a git-branchless stack, HEAD may point at a middle
-			// commit while higher commits are descendants. The original stack-pr
-			// discovers BASE..HEAD, so use the branchless stack top as the default
-			// head unless the user explicitly supplied --head.
-			if !headExplicit {
-				if branchlessHead, ok := git.BranchlessStackHead(repoRoot); ok {
-					ca.Head = branchlessHead
-				}
-			}
-
-			// Username
-			username, err := git.GetGHUsername()
-			if err != nil {
-				return err
-			}
-
-			appCtx := &AppContext{
-				Config:     cfg,
-				Args:       ca,
-				RepoRoot:   repoRoot,
-				Username:   username,
-				OrigBranch: origBranch,
-			}
-
-			if policy.ConfigOnly {
-				cmd.SetContext(newContextFromApp(appCtx))
-				return nil
-			}
-
-			// Stash (submit/export only, before clean check). Skipped in dry-run
-			// mode because stash save/restore mutates local Git state.
-			if policy.UsesStash && flagStash {
-				dryRun, _ := cmd.Flags().GetBool("dry-run")
-				if !dryRun {
-					stash, err := git.StashSave("stack-pr auto-stash")
-					if err != nil {
-						return fmt.Errorf("failed to stash changes: %w", err)
-					}
-					appCtx.AutomaticStash = stash
-				}
-			}
-			if !appCtx.AutomaticStash.IsZero() {
-				defer func() {
-					if err == nil {
-						return
-					}
-					if restoreErr := appCtx.RestoreStash(); restoreErr != nil {
-						err = errors.Join(err, fmt.Errorf("failed to restore automatic stash after initialization error: %w", restoreErr))
-					}
-				}()
-			}
-
-			// Require clean repo (all except read-only inspection/config commands)
-			if !policy.AllowsDirty {
-				if err := RequireCleanRepo(); err != nil {
-					return err
-				}
-			}
-
-			// Check that REMOTE/TARGET exists
-			if policy.RequiresTarget {
-				if err := git.TargetExists(ca.Remote, ca.Target); err != nil {
-					if ca.Target == "main" {
-						if e := git.TargetExists(ca.Remote, "master"); e == nil {
-							fmt.Fprintln(os.Stderr, "Hint: target branch 'main' not found, but 'master' exists on remote. Use --target master if applicable.")
-						}
-					}
-					return err
-				}
-			}
-
-			// Deduce base if missing
-			if policy.RequiresTarget && ca.Base == "" {
-				mb, err := git.MergeBase(ca.Head, ca.Remote+"/"+ca.Target)
-				if err != nil {
-					return fmt.Errorf("unable to deduce base merge-base: %w", err)
-				}
-				appCtx.Args.Base = mb
 			}
 
 			cmd.SetContext(newContextFromApp(appCtx))
@@ -250,7 +135,7 @@ func newRootCommand(progName string, args []string) (*cobra.Command, error) {
 	}
 
 	root.AddCommand(abandonCmd())
-	root.AddCommand(configCmd())
+	root.AddCommand(configCmd(bootstrap.RepoRoot()))
 	root.AddCommand(agentCmd())
 
 	root.SetArgs(args)

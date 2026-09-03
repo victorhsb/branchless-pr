@@ -7,7 +7,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/config"
 )
 
-func configCmd() *cobra.Command {
+func configCmd(repoRoot string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "config [init | set <section>.<key>=<value> | <section>.<key>=<value>]",
 		Short: "Manage or update stack-pr configuration.",
@@ -20,25 +20,25 @@ func configCmd() *cobra.Command {
 				return cmd.Usage()
 			}
 			if args[0] == "init" {
-				return runConfigInit(cmd)
+				return runConfigInit(cmd, repoRoot)
 			}
 			if args[0] == "set" {
 				if len(args) != 2 {
 					return fmt.Errorf("usage: config set <section>.<key>=<value>")
 				}
-				return runConfigSet(cmd, args[1])
+				return runConfigSet(cmd, repoRoot, args[1])
 			}
 			// Legacy inline syntax: config <section>.<key>=<value>
 			if len(args) == 1 {
-				return runConfigSet(cmd, args[0])
+				return runConfigSet(cmd, repoRoot, args[0])
 			}
 			return cmd.Usage()
 		},
 	}
 }
 
-func runConfigInit(cmd *cobra.Command) error {
-	path, err := config.FilePath()
+func runConfigInit(cmd *cobra.Command, repoRoot string) error {
+	path, err := config.FilePath(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -49,13 +49,13 @@ func runConfigInit(cmd *cobra.Command) error {
 	return nil
 }
 
-func runConfigSet(cmd *cobra.Command, arg string) error {
+func runConfigSet(cmd *cobra.Command, repoRoot, arg string) error {
 	section, key, value, err := config.ParseConfigArg(arg)
 	if err != nil {
 		return err
 	}
 	// Reload from disk to avoid overwriting concurrent changes.
-	cfgPath, err := config.FilePath()
+	cfgPath, err := config.FilePath(repoRoot)
 	if err != nil {
 		return err
 	}
