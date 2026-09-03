@@ -12,15 +12,7 @@ type Runner interface {
 	LookPath(file string) (string, error)
 }
 
-type DefaultRunner struct{}
-
-func (DefaultRunner) Output(args []string, opts shell.RunOpts) (string, error) {
-	return shell.Output(args, opts)
-}
-
-func (DefaultRunner) Run(args []string, opts shell.RunOpts) ([]byte, []byte, error) {
-	return shell.Run(args, opts)
-}
+type DefaultRunner struct{ shell.Default }
 
 func (DefaultRunner) LookPath(file string) (string, error) {
 	return exec.LookPath(file)

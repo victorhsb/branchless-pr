@@ -23,13 +23,30 @@ type RunOpts struct {
 	Stderr *bytes.Buffer
 }
 
+// Runner executes subprocesses.
+type Runner interface {
+	Run(args []string, opts RunOpts) ([]byte, []byte, error)
+	Output(args []string, opts RunOpts) (string, error)
+}
+
+// Default executes subprocesses through os/exec.
+type Default struct{}
+
+var _ Runner = Default{}
+
 // Run executes a command given as a slice of string arguments.
 //
-// When opts.Check is true (the default), a non-zero exit status returns an error
-// wrapping *exec.ExitError. If opts.Quiet is true, stdout and stderr are
-// captured to bytes.Buffer unless the caller provides explicit buffers.
-// If opts.Quiet is false, the command inherits the process stdout/stderr.
+// A non-zero exit status always returns an error. When opts.Check is true, the
+// error is additionally wrapped with the command argv; the zero value is
+// false. If opts.Quiet is true, stdout and stderr are captured to bytes.Buffer
+// unless the caller provides explicit buffers. If opts.Quiet is false, the
+// command inherits the process stdout/stderr.
 func Run(args []string, opts RunOpts) ([]byte, []byte, error) {
+	return Default{}.Run(args, opts)
+}
+
+// Run executes a command given as a slice of string arguments.
+func (Default) Run(args []string, opts RunOpts) ([]byte, []byte, error) {
 	if len(args) == 0 {
 		return nil, nil, fmt.Errorf("shell.Run: empty command")
 	}
@@ -74,24 +91,48 @@ func Run(args []string, opts RunOpts) ([]byte, []byte, error) {
 	return outBuf.Bytes(), errBuf.Bytes(), err
 }
 
-// AsExitError extracts *exec.ExitError from an error chain.
-func AsExitError(err error) *exec.ExitError {
+// ExitError is an error carrying a subprocess exit code.
+type ExitError interface {
+	error
+	ExitCode() int
+}
+
+// AsExitError extracts an ExitError from an error chain.
+func AsExitError(err error) ExitError {
 	if err == nil {
 		return nil
 	}
-	var exitErr *exec.ExitError
+	var exitErr ExitError
 	if errors.As(err, &exitErr) {
 		return exitErr
 	}
 	return nil
 }
 
+// ExitCode returns the process exit code carried by err.
+//
+// It accepts any error in the chain that implements ExitCode, including
+// *exec.ExitError and process-free test errors.
+func ExitCode(err error) (int, bool) {
+	exitErr := AsExitError(err)
+	if exitErr == nil {
+		return 0, false
+	}
+	return exitErr.ExitCode(), true
+}
+
 // Output executes a command and returns its stdout as a UTF-8 string with
-// trailing whitespace stripped (rtrim).
+// trailing whitespace stripped (rtrim). It always enables Quiet and Check.
 func Output(args []string, opts RunOpts) (string, error) {
+	return Default{}.Output(args, opts)
+}
+
+// Output executes a command and returns its stdout as a UTF-8 string with
+// trailing whitespace stripped (rtrim). It always enables Quiet and Check.
+func (d Default) Output(args []string, opts RunOpts) (string, error) {
 	opts.Quiet = true
 	opts.Check = true
-	out, _, err := Run(args, opts)
+	out, _, err := d.Run(args, opts)
 	if err != nil {
 		return "", err
 	}

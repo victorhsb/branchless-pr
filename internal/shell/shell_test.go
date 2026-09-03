@@ -2,6 +2,7 @@ package shell
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -56,3 +57,22 @@ func TestOutputStripsTrailingWhitespace(t *testing.T) {
 		t.Fatalf("expected %q, got %q", "hello", got)
 	}
 }
+
+func TestExitCodeFindsWrappedExitCoder(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", exitCodeError(17))
+	code, ok := ExitCode(err)
+	if !ok || code != 17 {
+		t.Fatalf("ExitCode() = (%d, %v), want (17, true)", code, ok)
+	}
+}
+
+func TestExitCodeRejectsOrdinaryError(t *testing.T) {
+	if code, ok := ExitCode(fmt.Errorf("ordinary")); ok {
+		t.Fatalf("ExitCode() = (%d, true), want (_, false)", code)
+	}
+}
+
+type exitCodeError int
+
+func (e exitCodeError) Error() string { return fmt.Sprintf("exit status %d", e) }
+func (e exitCodeError) ExitCode() int { return int(e) }

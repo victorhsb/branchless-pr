@@ -36,10 +36,8 @@ func BranchExists(branch string, repoDir ...string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if exitErr := shell.AsExitError(err); exitErr != nil {
-		if exitErr.ExitCode() == 1 {
-			return false, nil
-		}
+	if code, ok := shell.ExitCode(err); ok && code == 1 {
+		return false, nil
 	}
 	return false, &Error{Op: "branch_exists", Err: err}
 }
@@ -53,10 +51,8 @@ func CurrentBranchName(repoDir ...string) (string, error) {
 	}
 	out, err := shell.Output(args, opts)
 	if err != nil {
-		if exitErr := shell.AsExitError(err); exitErr != nil {
-			if exitErr.ExitCode() == NotARepo {
-				return "", &Error{Op: "current_branch_name", Err: exitErr}
-			}
+		if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == NotARepo {
+			return "", &Error{Op: "current_branch_name", Err: exitErr}
 		}
 		return "", &Error{Op: "current_branch_name", Err: err}
 	}
@@ -72,10 +68,8 @@ func RepoRoot(repoDir ...string) (string, error) {
 	}
 	out, err := shell.Output(args, opts)
 	if err != nil {
-		if exitErr := shell.AsExitError(err); exitErr != nil {
-			if exitErr.ExitCode() == NotARepo {
-				return "", &Error{Op: "repo_root", Err: exitErr}
-			}
+		if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == NotARepo {
+			return "", &Error{Op: "repo_root", Err: exitErr}
 		}
 		return "", &Error{Op: "repo_root", Err: err}
 	}
@@ -213,10 +207,8 @@ func IsAncestor(a, b string) (bool, error) {
 	if err == nil {
 		return true, nil
 	}
-	if exitErr := shell.AsExitError(err); exitErr != nil {
-		if exitErr.ExitCode() == 1 {
-			return false, nil
-		}
+	if code, ok := shell.ExitCode(err); ok && code == 1 {
+		return false, nil
 	}
 	return false, &Error{Op: "is_ancestor", Err: err}
 }
@@ -494,7 +486,7 @@ func stashHead() (string, error) {
 	if err == nil {
 		return strings.TrimSpace(string(out)), nil
 	}
-	if exitErr := shell.AsExitError(err); exitErr != nil && exitErr.ExitCode() == 1 {
+	if code, ok := shell.ExitCode(err); ok && code == 1 {
 		return "", nil
 	}
 	return "", &Error{Op: "stash_ref", Err: err}
@@ -643,10 +635,8 @@ func TargetExists(remote, target string) error {
 		shell.RunOpts{Quiet: true, Check: false},
 	)
 	if err != nil {
-		if exitErr := shell.AsExitError(err); exitErr != nil {
-			if exitErr.ExitCode() == 128 || exitErr.ExitCode() == 1 {
-				return fmt.Errorf("target branch %s does not exist on remote %s", target, remote)
-			}
+		if code, ok := shell.ExitCode(err); ok && (code == 128 || code == 1) {
+			return fmt.Errorf("target branch %s does not exist on remote %s", target, remote)
 		}
 		return &Error{Op: "target_exists", Err: err}
 	}
