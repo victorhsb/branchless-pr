@@ -13,6 +13,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -211,7 +212,7 @@ func TestTempDraftAndResetBasesOptimizedSkipsNoOps(t *testing.T) {
 		e.PR(): {BaseRefName: "main", IsDraft: true},
 	}}
 
-	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nil)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -235,7 +236,7 @@ func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
 		e.PR(): {BaseRefName: "feature", IsDraft: false},
 	}}
 
-	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nil)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shell.Default{}), stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestTempDraftAndResetBasesSkipsNativeStackedPRs(t *testing.T) {
 	e.SetPR("https://github.com/acme/repo/pull/5")
 
 	nativeStacked := map[int]bool{5: true}
-	tmp, err := tempDraftAndResetBases(stack.Stack{e}, "main", nativeStacked)
+	tmp, err := tempDraftAndResetBases(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", nativeStacked)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBases returned error: %v", err)
 	}
@@ -297,7 +298,7 @@ func TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs(t *testing.T) {
 	}}
 
 	nativeStacked := map[int]bool{7: true}
-	tmp, err := tempDraftAndResetBasesOptimized(stack.Stack{e}, "main", cache, nativeStacked)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", cache, nativeStacked)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
@@ -97,7 +98,7 @@ fi
 		t.Fatal(err)
 	}
 	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	gitRepo := git.New(repoDir, newFixGitRunner(t, headSHA, "Hello world", false))
+	gitRepo := git.New(repoDir, newFixGitRunner(t, headSHA, "Hello world", false, true))
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,7 @@ fi
 		app := &AppContext{
 			Config: config.Defaults(),
 			Git:    gitRepo,
+			PR:     newFixPRClient(t),
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -188,6 +190,7 @@ fi
 		headSHA,
 		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/42, branch: feature",
 		false,
+		true,
 	))
 	// update-ref requires a real git remote ref
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
@@ -198,6 +201,7 @@ fi
 		app := &AppContext{
 			Config: config.Defaults(),
 			Git:    gitRepo,
+			PR:     newFixPRClient(t),
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -270,6 +274,7 @@ fi
 		headSHA,
 		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch",
 		false,
+		false,
 	))
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
 		t.Fatal(err)
@@ -278,6 +283,7 @@ fi
 	err := fixImpl(&AppContext{
 		Config: config.Defaults(),
 		Git:    gitRepo,
+		PR:     newFixPRClient(t),
 		Args: CommonArgs{
 			Base:   headSHA,
 			Head:   "HEAD",
@@ -347,6 +353,7 @@ fi
 		headSHA,
 		"initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch",
 		true,
+		true,
 	)
 	gitRepo := git.New(repoDir, fixRun)
 	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
@@ -357,6 +364,7 @@ fi
 		app := &AppContext{
 			Config: config.Defaults(),
 			Git:    gitRepo,
+			PR:     newFixPRClient(t),
 			Args: CommonArgs{
 				Base:   headSHA,
 				Head:   "HEAD",
@@ -383,7 +391,7 @@ fi
 	}
 }
 
-func newFixGitRunner(t *testing.T, headSHA, commitMsg string, amend bool) *shelltest.Fake {
+func newFixGitRunner(t *testing.T, headSHA, commitMsg string, amend, discover bool) *shelltest.Fake {
 	t.Helper()
 	responses := []shelltest.Response{
 		{Match: shelltest.Exact("git", "rev-parse", "--git-path", "rebase-merge")},
@@ -405,7 +413,21 @@ func newFixGitRunner(t *testing.T, headSHA, commitMsg string, amend bool) *shell
 			Match: shelltest.Exact("git", "commit", "--amend", "-F", "-"),
 		})
 	}
+	if discover {
+		responses = append(responses, shelltest.Response{
+			Match: shelltest.Prefix("git", "rev-list", "--header"),
+		})
+	}
 	return shelltest.New(t, responses...)
+}
+
+func newFixPRClient(t *testing.T) *pr.Client {
+	t.Helper()
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Prefix("gh", "pr", "view", "42"),
+		Stdout: `{"url":"https://github.com/test/repo/pull/42","headRefName":"feature","baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","number":42,"state":"OPEN","body":"","title":"Test PR","mergeStateStatus":"CLEAN","isDraft":false}`,
+	})
+	return pr.NewClient(run)
 }
 
 func TestBuildFixedMessageAppendsMetadata(t *testing.T) {

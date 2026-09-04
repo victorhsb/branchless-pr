@@ -1,6 +1,10 @@
 package pr
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
+)
 
 func TestValidateRef(t *testing.T) {
 	cases := []struct {
@@ -31,35 +35,36 @@ func TestValidateRef(t *testing.T) {
 // A hostile `stack-info:` PR ref must be rejected before reaching `gh`.
 func TestPRWrappersRejectHostileRef(t *testing.T) {
 	const hostile = "--repo=attacker/evil"
+	client := NewClient(shelltest.New(t))
 
-	if _, err := View(hostile); err == nil {
+	if _, err := client.View(hostile); err == nil {
 		t.Error("View accepted a hostile PR ref")
 	}
-	if err := EditBase(hostile, "main"); err == nil {
+	if err := client.EditBase(hostile, "main"); err == nil {
 		t.Error("EditBase accepted a hostile PR ref")
 	}
-	if err := Edit(hostile, "t", "main", nil); err == nil {
+	if err := client.Edit(hostile, "t", "main", nil); err == nil {
 		t.Error("Edit accepted a hostile PR ref")
 	}
-	if err := EditTitleBody(hostile, "t", nil); err == nil {
+	if err := client.EditTitleBody(hostile, "t", nil); err == nil {
 		t.Error("EditTitleBody accepted a hostile PR ref")
 	}
-	if err := Ready(hostile); err == nil {
+	if err := client.Ready(hostile); err == nil {
 		t.Error("Ready accepted a hostile PR ref")
 	}
-	if err := ReadyUndo(hostile); err == nil {
+	if err := client.ReadyUndo(hostile); err == nil {
 		t.Error("ReadyUndo accepted a hostile PR ref")
 	}
-	if err := MergeSquash(hostile, "t", nil); err == nil {
+	if err := client.MergeSquash(hostile, "t", nil); err == nil {
 		t.Error("MergeSquash accepted a hostile PR ref")
 	}
-	if err := MergeRebase(hostile); err == nil {
+	if err := client.MergeRebase(hostile); err == nil {
 		t.Error("MergeRebase accepted a hostile PR ref")
 	}
-	if err := MergeRebaseAuto(hostile); err == nil {
+	if err := client.MergeRebaseAuto(hostile); err == nil {
 		t.Error("MergeRebaseAuto accepted a hostile PR ref")
 	}
-	if _, err := FetchChecks(hostile); err == nil {
+	if _, err := client.FetchChecks(hostile); err == nil {
 		t.Error("FetchChecks accepted a hostile PR ref")
 	}
 }

@@ -5,10 +5,52 @@ package pr
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
+
+// Client is the single boundary for GitHub CLI operations.
+type Client struct {
+	run shell.Runner
+}
+
+// NewClient returns a GitHub CLI client using run.
+func NewClient(run shell.Runner) *Client {
+	if run == nil {
+		run = shell.Default{}
+	}
+	return &Client{run: run}
+}
+
+func (c *Client) runner() shell.Runner {
+	return c.run
+}
+
+// CheckGHInstalled verifies that `gh` is on PATH.
+func (c *Client) CheckGHInstalled() error {
+	_, err := c.runner().Output([]string{"gh"}, shell.RunOpts{})
+	if err != nil {
+		return fmt.Errorf("git: check_gh_installed: gh does not appear to be installed; see https://cli.github.com/: %w", err)
+	}
+	return nil
+}
+
+var loginRe = regexp.MustCompile(`"login"\s*:\s*"([^"]+)"`)
+
+// GetGHUsername returns the current GitHub login name.
+func (c *Client) GetGHUsername() (string, error) {
+	out, err := c.runner().Output([]string{"gh", "api", "graphql", "-f", "query=query{viewer{login}}"}, shell.RunOpts{})
+	if err != nil {
+		return "", fmt.Errorf("git: get_gh_username: %w", err)
+	}
+	m := loginRe.FindStringSubmatch(out)
+	if m == nil {
+		return "", fmt.Errorf("git: get_gh_username: could not parse login from gh response")
+	}
+	return m[1], nil
+}
 
 // Info holds the JSON response from `gh pr view --json`.
 type Info struct {
@@ -25,7 +67,7 @@ type Info struct {
 }
 
 // View queries PR metadata from GitHub.
-func View(prRef string) (*Info, error) {
+func (c *Client) View(prRef string) (*Info, error) {
 	if err := ValidateRef(prRef); err != nil {
 		return nil, err
 	}
@@ -33,7 +75,7 @@ func View(prRef string) (*Info, error) {
 		"gh", "pr", "view", prRef,
 		"--json", "baseRefName,headRefName,headRefOid,number,state,body,title,url,mergeStateStatus,isDraft",
 	}
-	out, err := shell.Output(args, shell.RunOpts{})
+	out, err := c.runner().Output(args, shell.RunOpts{})
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view %s: %w", prRef, err)
 	}
@@ -45,18 +87,18 @@ func View(prRef string) (*Info, error) {
 }
 
 // ViewByNumber loads PR metadata by PR number (e.g., 42).
-func ViewByNumber(number int) (*Info, error) {
-	return View(fmt.Sprintf("%d", number))
+func (c *Client) ViewByNumber(number int) (*Info, error) {
+	return c.View(fmt.Sprintf("%d", number))
 }
 
 // ViewMany queries PR metadata for multiple PR refs.
-func ViewMany(prRefs []string) (map[string]*Info, error) {
+func (c *Client) ViewMany(prRefs []string) (map[string]*Info, error) {
 	infos := make(map[string]*Info, len(prRefs))
 	for _, prRef := range prRefs {
 		if prRef == "" {
 			continue
 		}
-		info, err := View(prRef)
+		info, err := c.View(prRef)
 		if err != nil {
 			return nil, err
 		}
@@ -66,17 +108,17 @@ func ViewMany(prRefs []string) (map[string]*Info, error) {
 }
 
 // LoadForSubmit loads the PR metadata submit/export needs for existing PRs.
-func LoadForSubmit(prRefs []string) (map[string]*Info, error) {
-	return ViewMany(prRefs)
+func (c *Client) LoadForSubmit(prRefs []string) (map[string]*Info, error) {
+	return c.ViewMany(prRefs)
 }
 
 // EditBase updates the base branch of a PR.
-func EditBase(prRef, base string) error {
+func (c *Client) EditBase(prRef, base string) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "edit", prRef, "-B", base}
-	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
+	_, stderr, err := c.runner().Run(args, shell.RunOpts{Quiet: true})
 	if err != nil {
 		return fmt.Errorf("gh pr edit -B %s %s: %w: %s", base, prRef, err, strings.TrimSpace(string(stderr)))
 	}
@@ -95,12 +137,12 @@ func IsNativeStackBaseError(err error) bool {
 // flag. This is used for PRs that belong to a GitHub native Stack, where the
 // API rejects any base edit. Callers that need to update the base should use
 // Edit instead.
-func EditTitleBody(prRef, title string, body []byte) error {
+func (c *Client) EditTitleBody(prRef, title string, body []byte) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-"}
-	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
+	_, stderr, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 	if err != nil {
 		return fmt.Errorf("gh pr edit %s: %w: %s", prRef, err, strings.TrimSpace(string(stderr)))
 	}
@@ -110,17 +152,17 @@ func EditTitleBody(prRef, title string, body []byte) error {
 // Edit updates title, body (from stdin), and base of a PR. When GitHub
 // rejects the base change because the PR is part of a native Stack, it
 // retries with only the title and body, leaving the base unchanged.
-func Edit(prRef, title, base string, body []byte) error {
+func (c *Client) Edit(prRef, title, base string, body []byte) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-", "-B", base}
-	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
+	_, stderr, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 	if err != nil {
 		wrapped := fmt.Errorf("gh pr edit %s: %w: %s", prRef, err, strings.TrimSpace(string(stderr)))
 		if IsNativeStackBaseError(wrapped) {
 			args := []string{"gh", "pr", "edit", prRef, "-t", title, "-F", "-"}
-			_, stderr2, err2 := shell.Run(args, shell.RunOpts{Quiet: true, Stdin: body})
+			_, stderr2, err2 := c.runner().Run(args, shell.RunOpts{Quiet: true, Stdin: body})
 			if err2 != nil {
 				return fmt.Errorf("gh pr edit %s: %w: %s", prRef, err2, strings.TrimSpace(string(stderr2)))
 			}
@@ -142,7 +184,7 @@ type CreateOptions struct {
 }
 
 // Create opens a new PR and returns its reference (URL).
-func Create(opts CreateOptions) (string, error) {
+func (c *Client) Create(opts CreateOptions) (string, error) {
 	args := []string{
 		"gh", "pr", "create",
 		"-B", opts.Base,
@@ -161,7 +203,7 @@ func Create(opts CreateOptions) (string, error) {
 	if opts.Draft {
 		args = append(args, "--draft")
 	}
-	out, errOut, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true, Stdin: opts.Body})
+	out, errOut, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Check: true, Stdin: opts.Body})
 	if err != nil {
 		stderr := strings.TrimSpace(string(errOut))
 		if stderr != "" {
@@ -190,12 +232,12 @@ func parseCreateOutput(out []byte) (string, error) {
 }
 
 // Ready marks a PR as ready for review.
-func Ready(prRef string) error {
+func (c *Client) Ready(prRef string) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "ready", prRef}
-	_, err := shell.Output(args, shell.RunOpts{})
+	_, err := c.runner().Output(args, shell.RunOpts{})
 	if err != nil {
 		return fmt.Errorf("gh pr ready %s: %w", prRef, err)
 	}
@@ -203,12 +245,12 @@ func Ready(prRef string) error {
 }
 
 // ReadyUndo marks a PR as draft again.
-func ReadyUndo(prRef string) error {
+func (c *Client) ReadyUndo(prRef string) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "ready", prRef, "--undo"}
-	_, err := shell.Output(args, shell.RunOpts{})
+	_, err := c.runner().Output(args, shell.RunOpts{})
 	if err != nil {
 		return fmt.Errorf("gh pr ready --undo %s: %w", prRef, err)
 	}
@@ -216,12 +258,12 @@ func ReadyUndo(prRef string) error {
 }
 
 // MergeSquash performs a squash merge on a PR.
-func MergeSquash(prRef, title string, body []byte) error {
+func (c *Client) MergeSquash(prRef, title string, body []byte) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "merge", prRef, "--squash", "-t", title, "-F", "-"}
-	_, _, err := shell.Run(args, shell.RunOpts{Stdin: body})
+	_, _, err := c.runner().Run(args, shell.RunOpts{Stdin: body})
 	if err != nil {
 		return fmt.Errorf("gh pr merge --squash %s: %w", prRef, err)
 	}
@@ -231,12 +273,12 @@ func MergeSquash(prRef, title string, body []byte) error {
 // MergeRebase performs a rebase merge on a PR via `gh pr merge --rebase`.
 // Commits land linearly on the PR's base branch, preserving their original
 // commit messages.
-func MergeRebase(prRef string) error {
+func (c *Client) MergeRebase(prRef string) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "merge", prRef, "--rebase"}
-	_, _, err := shell.Run(args, shell.RunOpts{})
+	_, _, err := c.runner().Run(args, shell.RunOpts{})
 	if err != nil {
 		return fmt.Errorf("gh pr merge --rebase %s: %w", prRef, err)
 	}
@@ -247,8 +289,8 @@ func MergeRebase(prRef string) error {
 // GraphQL API and reports whether rebase merges are enabled. Returns
 // (false, err) on any API/network failure so the caller can surface the
 // underlying error rather than silently falling back.
-func RebaseMergeAllowed(owner, repo string) (bool, error) {
-	return rebaseMergeAllowedWith(owner, repo, ghAPIGraphQL)
+func (c *Client) RebaseMergeAllowed(owner, repo string) (bool, error) {
+	return rebaseMergeAllowedWith(owner, repo, c.ghAPIGraphQL)
 }
 
 type graphqlRunner func(query string, fields map[string]string) ([]byte, error)
@@ -291,8 +333,8 @@ const (
 // MergeQueueEnabled queries GitHub for merge-queue rules on the target branch.
 // It prefers the REST rules API and returns MergeQueueStatusUnknown when the API
 // cannot provide a reliable answer.
-func MergeQueueEnabled(owner, repo, targetBranch string) (MergeQueueStatus, error) {
-	return mergeQueueEnabledWith(owner, repo, targetBranch, ghAPIRules)
+func (c *Client) MergeQueueEnabled(owner, repo, targetBranch string) (MergeQueueStatus, error) {
+	return mergeQueueEnabledWith(owner, repo, targetBranch, c.ghAPIRules)
 }
 
 type rulesRunner func(owner, repo, branch string) ([]byte, error)
@@ -316,10 +358,10 @@ func mergeQueueEnabledWith(owner, repo, targetBranch string, run rulesRunner) (M
 	return MergeQueueStatusDisabled, nil
 }
 
-func ghAPIRules(owner, repo, branch string) ([]byte, error) {
+func (c *Client) ghAPIRules(owner, repo, branch string) ([]byte, error) {
 	path := fmt.Sprintf("repos/%s/%s/rules/branches/%s", owner, repo, branch)
 	args := []string{"gh", "api", path}
-	out, _, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true})
+	out, _, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Check: true})
 	if err != nil {
 		return nil, err
 	}
@@ -329,12 +371,12 @@ func ghAPIRules(owner, repo, branch string) ([]byte, error) {
 // MergeRebaseAuto queues a rebase merge for a PR via `gh pr merge --rebase --auto`.
 // When the target branch requires a merge queue, GitHub adds the PR to the queue
 // once requirements are met; otherwise it enables auto-merge.
-func MergeRebaseAuto(prRef string) error {
+func (c *Client) MergeRebaseAuto(prRef string) error {
 	if err := ValidateRef(prRef); err != nil {
 		return err
 	}
 	args := []string{"gh", "pr", "merge", prRef, "--rebase", "--auto"}
-	_, stderr, err := shell.Run(args, shell.RunOpts{Quiet: true})
+	_, stderr, err := c.runner().Run(args, shell.RunOpts{Quiet: true})
 	if err != nil {
 		msg := string(stderr)
 		if isMergeQueueDisabledError(msg) {
@@ -344,12 +386,12 @@ func MergeRebaseAuto(prRef string) error {
 	}
 	return nil
 }
-func ghAPIGraphQL(query string, fields map[string]string) ([]byte, error) {
+func (c *Client) ghAPIGraphQL(query string, fields map[string]string) ([]byte, error) {
 	args := []string{"gh", "api", "graphql", "-f", "query=" + query}
 	for k, v := range fields {
 		args = append(args, "-f", fmt.Sprintf("%s=%s", k, v))
 	}
-	out, _, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true})
+	out, _, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Check: true})
 	if err != nil {
 		return nil, err
 	}

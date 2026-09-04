@@ -10,6 +10,8 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/invocation"
+	"github.com/victorhsb/branchless-pr/internal/pr"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -133,6 +135,7 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
 		Git:        git.New("", run),
+		PR:         pr.NewClient(shell.Default{}),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -176,6 +179,7 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
 		Git:        git.New("", run),
+		PR:         pr.NewClient(shell.Default{}),
 		OrigBranch: "feature",
 	}
 	bottom := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -224,6 +228,7 @@ func TestLandWholeStackRejectedWhenRebaseDisallowed(t *testing.T) {
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
 		Git:        git.New("", run),
+		PR:         pr.NewClient(shell.Default{}),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -257,6 +262,7 @@ func TestLandWholeStackRejectedWhenMergeQueueDisabled(t *testing.T) {
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
 		Git:        git.New("", run),
+		PR:         pr.NewClient(shell.Default{}),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -321,6 +327,7 @@ exit 0
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
 		Git:        git.New("", run),
+		PR:         pr.NewClient(shell.Default{}),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")

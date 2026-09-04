@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/victorhsb/branchless-pr/internal/config"
+	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/pr"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 func TestParseCommentKindsRejectsUnknown(t *testing.T) {
@@ -329,6 +331,7 @@ func commentsTestApp(repoDir, base, head string) *AppContext {
 			Target:             "main",
 			BranchNameTemplate: "$USERNAME/stack",
 		},
+		Git:        git.New(repoDir, shell.Default{}),
 		RepoRoot:   repoDir,
 		Username:   "alice",
 		OrigBranch: "main",

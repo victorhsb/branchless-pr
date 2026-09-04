@@ -29,17 +29,33 @@ func TestIsFullSHA(t *testing.T) {
 	}
 }
 
-func TestUsernameOverride(t *testing.T) {
-	u := "TestBot"
-	DefaultConfig().SetUsernameOverride(&u)
-	t.Cleanup(func() { DefaultConfig().SetUsernameOverride(nil) })
+func TestReposKeepRunnerAndDirectoryStateIsolated(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dir  string
+		root string
+	}{
+		{name: "first", dir: "/work/one", root: "/repo/one"},
+		{name: "second", dir: "/work/two", root: "/repo/two"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			run := shelltest.New(t, shelltest.Response{
+				Match: func(args []string, opts shell.RunOpts) bool {
+					return shelltest.Exact("git", "rev-parse", "--show-toplevel")(args, opts) && opts.Dir == tc.dir
+				},
+				Stdout: tc.root,
+			})
 
-	got, err := New("", nil).GetGHUsername()
-	if err != nil {
-		t.Fatalf("unexpected: %v", err)
-	}
-	if got != u {
-		t.Fatalf("expected %q, got %q", u, got)
+			got, err := New(tc.dir, run).RepoRoot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.root {
+				t.Fatalf("RepoRoot = %q, want %q", got, tc.root)
+			}
+		})
 	}
 }
 

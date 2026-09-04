@@ -51,7 +51,7 @@ func fixImpl(app *AppContext, opts fixOptions) error {
 		return fmt.Errorf("ERROR: A Git operation (rebase, merge, or cherry-pick) is in progress. Finish or abort it before running fix")
 	}
 
-	prInfo, err := pr.ViewByNumber(opts.PRNumber)
+	prInfo, err := app.PR.ViewByNumber(opts.PRNumber)
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot load PR %d: %w", opts.PRNumber, err)
 	}
@@ -130,7 +130,7 @@ func buildFixedMessage(currentMsg, prURL, headBranch string) string {
 }
 
 func printFixAdvisoryWarnings(app *AppContext) {
-	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	st, err := stack.Discover(app.Git, app.Args.Base, app.Args.Head)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not determine stack readiness: %v\n", err)
 		return

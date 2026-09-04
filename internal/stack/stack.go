@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/git"
 )
 
 // Stack is an ordered list of stack entries (bottom-to-top).
@@ -13,7 +13,7 @@ type Stack []*Entry
 
 // Discover loads commits from base..head via `git rev-list --header`.
 // Commits are returned oldest-to-newest.
-func Discover(base, head string) (Stack, error) {
+func Discover(repo *git.Repo, base, head string) (Stack, error) {
 	if base == "" {
 		return nil, fmt.Errorf("base is required")
 	}
@@ -21,8 +21,7 @@ func Discover(base, head string) (Stack, error) {
 		head = "HEAD"
 	}
 
-	args := []string{"git", "rev-list", "--header", "^" + base, head}
-	out, err := shell.Output(args, shell.RunOpts{})
+	out, err := repo.RevListHeaders(base, head)
 	if err != nil {
 		return nil, fmt.Errorf("rev-list: %w", err)
 	}
@@ -60,8 +59,8 @@ func (st Stack) Reverse() Stack {
 
 // AssignHeads assigns generated branch names to entries missing metadata heads.
 // Existing metadata takes precedence.
-func (st Stack) AssignHeads(tmpl BranchTemplate, username, branchName string, remote string) error {
-	nextID, err := NextID(remote, tmpl, username, branchName)
+func (st Stack) AssignHeads(repo *git.Repo, tmpl BranchTemplate, username, branchName string, remote string) error {
+	nextID, err := NextID(repo, remote, tmpl, username, branchName)
 	if err != nil {
 		return fmt.Errorf("next branch id: %w", err)
 	}

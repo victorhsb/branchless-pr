@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
-var lowerHex = "0123456789abcdef"
+const lowerHex = "0123456789abcdef"
 
 // Repo runs Git commands in one working directory through an injectable runner.
 // An empty Dir uses the process working directory.
@@ -21,13 +20,13 @@ type Repo struct {
 
 // New returns a Git repository command boundary.
 func New(dir string, run shell.Runner) *Repo {
+	if run == nil {
+		run = shell.Default{}
+	}
 	return &Repo{Dir: dir, run: run}
 }
 
 func (r *Repo) runner() shell.Runner {
-	if r == nil || r.run == nil {
-		return shell.Default{}
-	}
 	return r.run
 }
 
@@ -111,39 +110,6 @@ func (r *Repo) UncommittedChanges() (map[string]string, error) {
 	return result, nil
 }
 
-// CheckGHInstalled verifies that `gh` is on PATH.
-func (r *Repo) CheckGHInstalled() error {
-	_, err := r.runner().Output([]string{"gh"}, r.opts(shell.RunOpts{}))
-	if err != nil {
-		return &Error{
-			Op:  "check_gh_installed",
-			Err: fmt.Errorf("gh does not appear to be installed; see https://cli.github.com/: %w", err),
-		}
-	}
-	return nil
-}
-
-var loginRe = regexp.MustCompile(`"login"\s*:\s*"([^"]+)"`)
-
-// GetGHUsername returns the current GitHub login name.
-func (r *Repo) GetGHUsername() (string, error) {
-	if u := gitConfig.UsernameOverride(); u != nil {
-		return *u, nil
-	}
-	out, err := r.runner().Output(
-		[]string{"gh", "api", "graphql", "-f", "query=query{viewer{login}}"},
-		r.opts(shell.RunOpts{}),
-	)
-	if err != nil {
-		return "", &Error{Op: "get_gh_username", Err: err}
-	}
-	m := loginRe.FindStringSubmatch(out)
-	if m == nil {
-		return "", &Error{Op: "get_gh_username", Err: fmt.Errorf("could not parse login from gh response")}
-	}
-	return m[1], nil
-}
-
 // IsRebaseInProgress reports whether a rebase is currently active.
 func (r *Repo) IsRebaseInProgress() bool {
 	for _, name := range []string{"rebase-merge", "rebase-apply"} {
@@ -180,6 +146,22 @@ func (r *Repo) MergeBase(a, b string) (string, error) {
 		return "", &Error{Op: "merge_base", Err: err}
 	}
 	return out, nil
+}
+
+// RevListHeaders returns NUL-delimited commit headers for base..head.
+func (r *Repo) RevListHeaders(base, head string) (string, error) {
+	return r.runner().Output(
+		[]string{"git", "rev-list", "--header", "^" + base, head},
+		r.opts(shell.RunOpts{}),
+	)
+}
+
+// RemoteHeads returns all branch refs advertised by remote.
+func (r *Repo) RemoteHeads(remote string) (string, error) {
+	return r.runner().Output(
+		[]string{"git", "ls-remote", "--heads", remote},
+		r.opts(shell.RunOpts{}),
+	)
 }
 
 // BranchlessStackHead returns the top commit in the current git-branchless

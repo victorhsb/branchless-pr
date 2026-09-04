@@ -5,10 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 type runResult struct {
@@ -22,30 +21,109 @@ type recordedCall struct {
 	stdin []byte
 }
 
+type queuedTransport struct {
+	t       *testing.T
+	results []runResult
+	next    int
+	calls   []recordedCall
+}
+
 func queuedClient(t *testing.T, results ...runResult) (*APIClient, *[]recordedCall) {
 	t.Helper()
-	calls := make([]recordedCall, 0, len(results))
-	next := 0
-	client := NewAPIClient("octocat", "hello-world")
+	transport := &queuedTransport{t: t, results: results}
+	client := NewAPIClient("octocat", "hello-world", transport)
 	client.availabilityProbed = true
-	client.run = func(args []string, opts shell.RunOpts) ([]byte, []byte, error) {
-		if next >= len(results) {
-			t.Fatalf("unexpected gh call: %v", args)
-		}
-		calls = append(calls, recordedCall{
-			args:  append([]string(nil), args...),
-			stdin: append([]byte(nil), opts.Stdin...),
-		})
-		result := results[next]
-		next++
-		return result.stdout, result.stderr, result.err
-	}
 	t.Cleanup(func() {
-		if next != len(results) {
-			t.Errorf("used %d/%d queued gh results", next, len(results))
+		if transport.next != len(results) {
+			t.Errorf("used %d/%d queued transport results", transport.next, len(results))
 		}
 	})
-	return client, &calls
+	return client, &transport.calls
+}
+
+func (t *queuedTransport) Request(method, endpoint string, body []byte, write bool) (*Response, error) {
+	t.calls = append(t.calls, recordedCall{
+		args:  []string{"REQUEST", method, endpoint},
+		stdin: append([]byte(nil), body...),
+	})
+	result := t.nextResult()
+	return testResponse(method, endpoint, write, result)
+}
+
+func (t *queuedTransport) Paginate(endpoint string) ([]byte, error) {
+	t.calls = append(t.calls, recordedCall{args: []string{"PAGINATE", "--paginate", "--slurp", endpoint}})
+	result := t.nextResult()
+	if result.err != nil {
+		return nil, result.err
+	}
+	return result.stdout, nil
+}
+
+func (t *queuedTransport) GraphQL(query string, fields map[string]string) (*Response, error) {
+	t.calls = append(t.calls, recordedCall{args: []string{"GRAPHQL", query}})
+	result := t.nextResult()
+	return testResponse("POST", "graphql", false, result)
+}
+
+func (t *queuedTransport) nextResult() runResult {
+	t.t.Helper()
+	if t.next >= len(t.results) {
+		t.t.Fatalf("unexpected transport call")
+	}
+	result := t.results[t.next]
+	t.next++
+	return result
+}
+
+func testResponse(method, endpoint string, write bool, result runResult) (*Response, error) {
+	resp, parseErr := testParseIncludedResponse(result.stdout)
+	if result.err == nil {
+		return resp, parseErr
+	}
+	status := 0
+	headers := ""
+	message := strings.TrimSpace(strings.Join([]string{string(result.stdout), string(result.stderr)}, "\n"))
+	if parseErr == nil {
+		status = resp.Status
+		headers = resp.Headers
+		if body := strings.TrimSpace(string(resp.Body)); body != "" {
+			message = body
+		}
+	}
+	return nil, &APIError{
+		Method:         method,
+		Endpoint:       endpoint,
+		Status:         status,
+		Message:        message,
+		Headers:        headers,
+		OutcomeUnknown: write && (status == 0 || status >= 500),
+		Err:            result.err,
+	}
+}
+
+func testParseIncludedResponse(out []byte) (*Response, error) {
+	normalized := strings.ReplaceAll(string(out), "\r\n", "\n")
+	statusLineEnd := strings.IndexByte(normalized, '\n')
+	if statusLineEnd < 0 {
+		return nil, fmt.Errorf("response omitted HTTP status headers")
+	}
+	statusFields := strings.Fields(normalized[:statusLineEnd])
+	if len(statusFields) < 2 {
+		return nil, fmt.Errorf("response omitted HTTP status")
+	}
+	status, err := strconv.Atoi(statusFields[1])
+	if err != nil {
+		return nil, err
+	}
+	blank := strings.Index(normalized, "\n\n")
+	if blank < 0 {
+		return &Response{Status: status, Headers: normalized}, nil
+	}
+	return &Response{
+		Status:  status,
+		Headers: normalized[:blank+2],
+		Body:    []byte(normalized[blank+2:]),
+	}, nil
 }
 
 func included(status int, body string) []byte {
@@ -246,25 +324,6 @@ func TestStackMemberMergedAtDistinguishesClosedOutcomes(t *testing.T) {
 	}
 	if closed.IsMerged() {
 		t.Fatal("closed with merged_at null must remain unmerged")
-	}
-}
-
-func TestParseIncludedResponseStatuses(t *testing.T) {
-	for _, tc := range []struct {
-		status int
-		body   string
-	}{
-		{200, stackFixture(7, 10)},
-		{201, stackFixture(8, 10, 20)},
-		{204, ""},
-	} {
-		resp, err := parseIncludedResponse(included(tc.status, tc.body))
-		if err != nil {
-			t.Fatalf("status %d: %v", tc.status, err)
-		}
-		if resp.Status != tc.status || strings.TrimSpace(string(resp.Body)) != strings.TrimSpace(tc.body) {
-			t.Fatalf("response = %+v", resp)
-		}
 	}
 }
 
@@ -528,36 +587,6 @@ func TestUncertainWritesReconcileBeforeReturning(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
-}
-
-func TestAPIErrorsPreserveStatusAndWriteUncertainty(t *testing.T) {
-	for _, tc := range []struct {
-		status         int
-		write          bool
-		outcomeUnknown bool
-	}{
-		{401, false, false},
-		{403, false, false},
-		{422, true, false},
-		{429, true, false},
-		{503, true, true},
-	} {
-		err := classifyRequestError(
-			"POST",
-			"repos/octocat/hello-world/stacks",
-			tc.write,
-			included(tc.status, `{"message":"failure"}`),
-			nil,
-			errors.New("exit status 1"),
-		)
-		var apiErr *APIError
-		if !errors.As(err, &apiErr) {
-			t.Fatalf("status %d: error = %T", tc.status, err)
-		}
-		if apiErr.Status != tc.status || apiErr.OutcomeUnknown != tc.outcomeUnknown {
-			t.Fatalf("status %d: APIError = %+v", tc.status, apiErr)
-		}
-	}
 }
 
 func TestValidationFailureIsNotRetried(t *testing.T) {

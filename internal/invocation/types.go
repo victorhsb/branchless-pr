@@ -6,6 +6,7 @@ import (
 
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
 // CommonArgs holds resolved shared arguments across commands (SPEC §9.3).
@@ -25,6 +26,7 @@ type AppContext struct {
 	Config         *config.Config
 	Args           CommonArgs
 	Git            *git.Repo
+	PR             *pr.Client
 	RepoRoot       string
 	Username       string
 	OrigBranch     string

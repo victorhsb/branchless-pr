@@ -53,7 +53,7 @@ func TestBootstrapUsesInjectedRunnerForDiscoveryAndContext(t *testing.T) {
 		t.Fatalf("identity = (%q, %q), want (feature, octocat)", app.OrigBranch, app.Username)
 	}
 	for i, call := range run.Calls() {
-		if i >= 2 && call.Opts.Dir != "/repo" {
+		if i >= 2 && call.Args[0] == "git" && call.Opts.Dir != "/repo" {
 			t.Fatalf("call %d Dir = %q, want /repo", i, call.Opts.Dir)
 		}
 	}

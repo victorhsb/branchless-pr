@@ -30,7 +30,7 @@ type Options struct {
 type Fetcher func(prRef string) (*pr.PullRequestChecks, error)
 
 func Run(app *AppContext, opts Options, w io.Writer) error {
-	return RunWithFetcher(app, opts, w, pr.FetchChecks)
+	return RunWithFetcher(app, opts, w, app.PR.FetchChecks)
 }
 
 func RunWithFetcher(app *AppContext, opts Options, w io.Writer, fetch Fetcher) error {
@@ -109,6 +109,7 @@ type failedCheckSummary struct {
 
 func Build(app *AppContext, opts Options, fetch Fetcher) (*checksReport, error) {
 	st, err := stackstate.Load(stackstate.Args{
+		Repo:               app.Git,
 		Base:               app.Args.Base,
 		Head:               app.Args.Head,
 		Remote:             app.Args.Remote,

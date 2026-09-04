@@ -71,8 +71,8 @@ func IsAuthError(err error) bool {
 }
 
 // FetchComments fetches read-only PR comments, reviews, and review threads.
-func FetchComments(prRef string) (*PullRequestComments, error) {
-	summary, err := fetchPRCommentSummary(prRef)
+func (c *Client) FetchComments(prRef string) (*PullRequestComments, error) {
+	summary, err := c.fetchPRCommentSummary(prRef)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func FetchComments(prRef string) (*PullRequestComments, error) {
 		return report, nil
 	}
 
-	threads, err := fetchReviewThreads(owner, repo, summary.Number)
+	threads, err := c.fetchReviewThreads(owner, repo, summary.Number)
 	if err != nil {
 		if IsAuthError(err) {
 			return nil, err
@@ -151,11 +151,11 @@ type ghPRViewComments struct {
 	Reviews  []ghReview  `json:"reviews"`
 }
 
-func fetchPRCommentSummary(prRef string) (*prCommentSummary, error) {
+func (c *Client) fetchPRCommentSummary(prRef string) (*prCommentSummary, error) {
 	if err := ValidateRef(prRef); err != nil {
 		return nil, err
 	}
-	out, err := runGHJSON([]string{"gh", "pr", "view", prRef, "--json", "number,url,comments,reviews"})
+	out, err := c.runGHJSON([]string{"gh", "pr", "view", prRef, "--json", "number,url,comments,reviews"})
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view comments %s: %w", prRef, err)
 	}
@@ -210,7 +210,7 @@ func ParsePRCommentSummary(data []byte) (*prCommentSummary, error) {
 	return result, nil
 }
 
-func fetchReviewThreads(owner, repo string, number int) ([]CommentItem, error) {
+func (c *Client) fetchReviewThreads(owner, repo string, number int) ([]CommentItem, error) {
 	query := `query($owner:String!, $repo:String!, $number:Int!) {
   repository(owner:$owner, name:$repo) {
     pullRequest(number:$number) {
@@ -244,7 +244,7 @@ func fetchReviewThreads(owner, repo string, number int) ([]CommentItem, error) {
     }
   }
 }`
-	out, err := runGHJSON([]string{
+	out, err := c.runGHJSON([]string{
 		"gh", "api", "graphql",
 		"-f", "query=" + query,
 		"-f", "owner=" + owner,
@@ -339,8 +339,8 @@ func ParseReviewThreads(prNumber int, data []byte) ([]CommentItem, error) {
 	return items, nil
 }
 
-func runGHJSON(args []string) ([]byte, error) {
-	out, errOut, err := shell.Run(args, shell.RunOpts{Quiet: true, Check: true})
+func (c *Client) runGHJSON(args []string) ([]byte, error) {
+	out, errOut, err := c.runner().Run(args, shell.RunOpts{Quiet: true, Check: true})
 	if err == nil {
 		return out, nil
 	}

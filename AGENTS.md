@@ -32,9 +32,9 @@ Entry: `cmd/bpr/main.go` → `internal/cli.Execute()` → Cobra root command in 
 ### Package map (internal/)
 
 - `cli/` — Cobra subcommands (`submit`/`export`, `view`, `land`, `abandon`, `config`, `agent`, `comments`, `checks`). `root.go` wires shared flags, loads config, resolves `CommonArgs`, sets up `AppContext`, and gates the `land` subcommand on `land.style != disable`.
-- `stack/` — Core model: `Entry`, `CommitHeader`, stack discovery via `git rev-list --header ^BASE HEAD` (NUL-delimited), header parsing, branch name templating (`$USERNAME/stack` etc.), TOC/crosslink rendering.
-- `git/` — Typed wrappers around `git` (merge-base, current branch, stash, push, branchless stack head detection, `gh` install check, GH username).
-- `pr/` — `gh` CLI wrappers for PR create/edit/view/comments/checks.
+- `stack/` — Core model: `Entry`, `CommitHeader`, parsing NUL-delimited `git rev-list --header ^BASE HEAD` output, branch name templating (`$USERNAME/stack` etc.), TOC/crosslink rendering.
+- `git/` — `Repo` is the per-invocation boundary for all `git` commands, carrying the repository directory and injected `shell.Runner`.
+- `pr/` — `Client` is the per-invocation boundary for all `gh` commands, including PR create/edit/view/comments/checks and the transport used by native Stacks.
 - `shell/` — The **only** subprocess wrapper. **Do not call `os/exec` directly outside this package** (per `CONTRIBUTING.md`).
 - `config/` — INI parsing for `<repo-root>/.stack-pr.cfg` (override path with `STACKPR_CONFIG`). Sections: `[common]`, `[repo]`, `[comments]`, `[land]`. Defaults merged in `cli/root.go`.
 - `agent/` — Static, deterministic LLM-facing prompts for `stack-pr agent prompt [topic]`. Side-effect-free; runs outside a repo.

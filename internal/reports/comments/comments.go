@@ -28,7 +28,7 @@ type Options struct {
 type Fetcher func(prRef string) (*pr.PullRequestComments, error)
 
 func Run(app *AppContext, opts Options, w io.Writer) error {
-	return RunWithFetcher(app, opts, w, pr.FetchComments)
+	return RunWithFetcher(app, opts, w, app.PR.FetchComments)
 }
 
 func RunWithFetcher(app *AppContext, opts Options, w io.Writer, fetch Fetcher) error {
@@ -94,6 +94,7 @@ type commentsPullRequestReport struct {
 
 func Build(app *AppContext, opts Options, kinds map[string]bool, fetch Fetcher) (*commentsReport, error) {
 	st, err := stackstate.Load(stackstate.Args{
+		Repo:               app.Git,
 		Base:               app.Args.Base,
 		Head:               app.Args.Head,
 		Remote:             app.Args.Remote,

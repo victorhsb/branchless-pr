@@ -1,10 +1,12 @@
 package stackstate
 
 import (
+	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
 type Args struct {
+	Repo               *git.Repo
 	Base               string
 	Head               string
 	Remote             string
@@ -15,7 +17,7 @@ type Args struct {
 }
 
 func Load(args Args) (stack.Stack, error) {
-	st, err := stack.Discover(args.Base, args.Head)
+	st, err := stack.Discover(args.Repo, args.Base, args.Head)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +28,7 @@ func Load(args Args) (stack.Stack, error) {
 		return st, nil
 	}
 	tmpl := stack.ParseTemplate(args.BranchNameTemplate)
-	if err := st.AssignHeads(tmpl, args.Username, args.OrigBranch, args.Remote); err != nil {
+	if err := st.AssignHeads(args.Repo, tmpl, args.Username, args.OrigBranch, args.Remote); err != nil {
 		return nil, err
 	}
 	st.AssignBases(args.Target)

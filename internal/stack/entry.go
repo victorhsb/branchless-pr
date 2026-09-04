@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/git"
 )
 
 var (
@@ -307,9 +307,8 @@ func (bt BranchTemplate) ExtractID(branch, username, localBranch string) (int, e
 
 // NextID scans remote refs for branches matching the template and returns
 // the maximum existing ID plus one. If none are found, returns 1.
-func NextID(remote string, tmpl BranchTemplate, username, localBranch string) (int, error) {
-	args := []string{"git", "ls-remote", "--heads", remote}
-	out, err := shell.Output(args, shell.RunOpts{})
+func NextID(repo *git.Repo, remote string, tmpl BranchTemplate, username, localBranch string) (int, error) {
+	out, err := repo.RemoteHeads(remote)
 	if err != nil {
 		return 0, fmt.Errorf("ls-remote: %w", err)
 	}

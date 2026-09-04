@@ -12,10 +12,6 @@ import (
 )
 
 func TestAutomaticStashRestoredAcrossInvocationLifecycle(t *testing.T) {
-	username := "stash-test-user"
-	gitpkg.DefaultConfig().SetUsernameOverride(&username)
-	t.Cleanup(func() { gitpkg.DefaultConfig().SetUsernameOverride(nil) })
-
 	tests := []struct {
 		name             string
 		args             []string
@@ -76,10 +72,6 @@ func TestAutomaticStashRestoredAcrossInvocationLifecycle(t *testing.T) {
 }
 
 func TestPreRunPreservesInitializationAndStashRestoreFailures(t *testing.T) {
-	username := "stash-test-user"
-	gitpkg.DefaultConfig().SetUsernameOverride(&username)
-	t.Cleanup(func() { gitpkg.DefaultConfig().SetUsernameOverride(nil) })
-
 	repo, realGit := setupStashLifecycleRepo(t)
 	runner := installStashLifecycleCommands(t, false, true)
 	chdirForTest(t, repo)
@@ -107,10 +99,6 @@ func TestRestoreStashDoesNothingWhenInvocationCreatedNoStash(t *testing.T) {
 }
 
 func TestAutomaticStashRestorationPreservesPreExistingUserStash(t *testing.T) {
-	username := "stash-test-user"
-	gitpkg.DefaultConfig().SetUsernameOverride(&username)
-	t.Cleanup(func() { gitpkg.DefaultConfig().SetUsernameOverride(nil) })
-
 	repo, realGit := setupStashLifecycleRepo(t)
 	runGitForStashTest(t, realGit, repo, "stash", "push", "-m", "pre-existing user stash")
 	userOID := gitOutputForStashTest(t, realGit, repo, "rev-parse", "refs/stash^{commit}")
@@ -210,7 +198,11 @@ func setupStashLifecycleRepo(t *testing.T) (repo, realGit string) {
 func installStashLifecycleCommands(t *testing.T, forceDirtyStatus, failStashRestore bool) shell.Runner {
 	t.Helper()
 	bin := t.TempDir()
-	ghScript := "#!/bin/sh\nexit 0\n"
+	ghScript := "#!/bin/sh\n" +
+		"if [ \"$1\" = api ]; then\n" +
+		"  printf '{\"data\":{\"viewer\":{\"login\":\"stash-test-user\"}}}\\n'\n" +
+		"fi\n" +
+		"exit 0\n"
 	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(ghScript), 0o755); err != nil {
 		t.Fatal(err)
 	}

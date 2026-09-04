@@ -6,15 +6,6 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
-// Verify validates every StackEntry against GitHub.
-// It queries gh pr view for each entry that already has a PR.
-//
-// If checkBase is true, it also validates that the baseRefName matches the
-// assigned base branch and that the bottom-most PR is mergeable.
-func Verify(st Stack, checkBase bool) error {
-	return VerifyWithInfo(st, checkBase, nil)
-}
-
 // PRInfoProvider returns GitHub state for a PR reference.
 type PRInfoProvider func(prRef string) (*pr.Info, error)
 
@@ -23,15 +14,16 @@ func VerifyWithProvider(st Stack, checkBase bool, provider PRInfoProvider) error
 	return verifyWithLookup(st, checkBase, provider)
 }
 
-// VerifyWithInfo validates every StackEntry against GitHub or a caller-provided
-// PR info lookup. Missing lookup entries fall back to gh pr view.
+// VerifyWithInfo validates every StackEntry with a caller-provided PR info
+// lookup. Missing entries are rejected rather than crossing the GitHub boundary
+// from the stack package.
 func VerifyWithInfo(st Stack, checkBase bool, lookup func(prRef string) (*pr.Info, bool)) error {
 	return verifyWithLookup(st, checkBase, func(prRef string) (*pr.Info, error) {
 		info, ok := lookupInfo(lookup, prRef)
 		if ok {
 			return info, nil
 		}
-		return pr.View(prRef)
+		return nil, fmt.Errorf("PR state for %s was not provided", prRef)
 	})
 }
 

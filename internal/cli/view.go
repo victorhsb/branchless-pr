@@ -43,7 +43,7 @@ func runView(app *AppContext, format string) error {
 	}
 
 	// 3. Discover stack.
-	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	st, err := stack.Discover(app.Git, app.Args.Base, app.Args.Head)
 	if err != nil {
 		return err
 	}
@@ -66,7 +66,7 @@ func runView(app *AppContext, format string) error {
 	// 6. Assign heads for entries missing metadata by scanning remote.
 	// Unlike submit, we only compute names; we don't create branches.
 	tmpl := stack.ParseTemplate(app.Args.BranchNameTemplate)
-	if err := st.AssignHeads(tmpl, app.Username, app.OrigBranch, app.Args.Remote); err != nil {
+	if err := st.AssignHeads(app.Git, tmpl, app.Username, app.OrigBranch, app.Args.Remote); err != nil {
 		return err
 	}
 
@@ -163,7 +163,7 @@ func loadNativeMembership(app *AppContext, st stack.Stack, mode config.NativeSta
 		return fmt.Errorf("cannot resolve owner/repo for native membership: %w", err)
 	}
 
-	client := nativestacks.NewAPIClient(owner, repo)
+	client := app.PR.NativeStacks(owner, repo)
 	memberships, _, err := client.LoadMembership(prNumbers)
 	if err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {

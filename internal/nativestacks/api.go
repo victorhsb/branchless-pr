@@ -4,37 +4,36 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
-var (
-	includedStatusRE = regexp.MustCompile(`(?m)^HTTP/\S+[ \t]+([0-9]{3})[^\n]*\n`)
-	stderrStatusRE   = regexp.MustCompile(`(?i)\bHTTP[ /]+([0-9]{3})\b`)
-)
-
-type apiResponse struct {
+// Response is the transport-neutral result of one GitHub API request.
+type Response struct {
 	Status  int
 	Headers string
 	Body    []byte
 }
 
-type runFunc func([]string, shell.RunOpts) ([]byte, []byte, error)
+// Transport supplies GitHub API responses without exposing subprocess details
+// to the native Stacks domain package.
+type Transport interface {
+	Request(method, endpoint string, body []byte, write bool) (*Response, error)
+	Paginate(endpoint string) ([]byte, error)
+	GraphQL(query string, fields map[string]string) (*Response, error)
+}
 
-// APIClient wraps direct `gh api` calls for native Stacks.
+// APIClient implements native Stacks domain operations over a GitHub transport.
 type APIClient struct {
 	owner              string
 	repo               string
 	availabilityProbed bool
-	run                runFunc
+	transport          Transport
 }
 
 // NewAPIClient returns a client scoped to owner/repo.
-func NewAPIClient(owner, repo string) *APIClient {
-	return &APIClient{owner: owner, repo: repo, run: shell.Run}
+func NewAPIClient(owner, repo string, transport Transport) *APIClient {
+	return &APIClient{owner: owner, repo: repo, transport: transport}
 }
 
 func (c *APIClient) repoPath(suffix string) string {
@@ -148,10 +147,9 @@ func (c *APIClient) FindStackForPR(prNumber int) (*Stack, error) {
 // ListStacks enumerates all repository Stacks with GitHub CLI pagination.
 func (c *APIClient) ListStacks() ([]Stack, error) {
 	path := c.repoPath("stacks?per_page=100")
-	args := []string{"gh", "api", "--paginate", "--slurp", path}
-	stdout, stderr, err := c.run(args, shell.RunOpts{Quiet: true})
+	stdout, err := c.transport.Paginate(path)
 	if err != nil {
-		return nil, classifyRequestError("GET", path, false, stdout, stderr, err)
+		return nil, err
 	}
 	var pages [][]Stack
 	if err := json.Unmarshal(stdout, &pages); err != nil {
@@ -263,20 +261,13 @@ func (c *APIClient) LoadWriteLifecycle(plan *Result, prs map[int]*PullRequest) e
 
 func (c *APIClient) loadPullRequestLifecycle(pr *PullRequest) error {
 	const query = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){number state isDraft merged mergedAt mergeQueueEntry{id} autoMergeRequest{enabledAt}}}}`
-	args := []string{
-		"gh", "api", "--include", "--method", "POST", "graphql",
-		"-f", "query=" + query,
-		"-f", "owner=" + c.owner,
-		"-f", "repo=" + c.repo,
-		"-F", "number=" + strconv.Itoa(pr.Number),
-	}
-	stdout, stderr, err := c.run(args, shell.RunOpts{Quiet: true})
+	resp, err := c.transport.GraphQL(query, map[string]string{
+		"owner":  c.owner,
+		"repo":   c.repo,
+		"number": strconv.Itoa(pr.Number),
+	})
 	if err != nil {
-		return classifyRequestError("POST", "graphql", false, stdout, stderr, err)
-	}
-	resp, err := parseIncludedResponse(stdout)
-	if err != nil {
-		return fmt.Errorf("parse lifecycle response for PR #%d: %w", pr.Number, err)
+		return err
 	}
 	if resp.Status != 200 {
 		return unexpectedStatus("POST", "graphql", resp, 200, false)
@@ -490,81 +481,11 @@ func (c *APIClient) reconcileUnstackFailure(stackNumber int, writeErr error) (*U
 	return &UnstackResult{Stack: s, Recovered: true}, nil
 }
 
-func (c *APIClient) request(method, endpoint string, body []byte, write bool) (*apiResponse, error) {
-	args := []string{"gh", "api", "--include", "--method", method, endpoint}
-	opts := shell.RunOpts{Quiet: true}
-	if body != nil {
-		args = append(args, "--input", "-")
-		opts.Stdin = body
-	}
-	stdout, stderr, err := c.run(args, opts)
-	if err != nil {
-		return nil, classifyRequestError(method, endpoint, write, stdout, stderr, err)
-	}
-	resp, parseErr := parseIncludedResponse(stdout)
-	if parseErr != nil {
-		return nil, &APIError{
-			Method:         method,
-			Endpoint:       endpoint,
-			Message:        parseErr.Error(),
-			OutcomeUnknown: write,
-		}
-	}
-	return resp, nil
+func (c *APIClient) request(method, endpoint string, body []byte, write bool) (*Response, error) {
+	return c.transport.Request(method, endpoint, body, write)
 }
 
-func parseIncludedResponse(out []byte) (*apiResponse, error) {
-	normalized := strings.ReplaceAll(string(out), "\r\n", "\n")
-	matches := includedStatusRE.FindAllStringSubmatchIndex(normalized, -1)
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("gh api response omitted HTTP status headers")
-	}
-	match := matches[len(matches)-1]
-	status, err := strconv.Atoi(normalized[match[2]:match[3]])
-	if err != nil {
-		return nil, fmt.Errorf("parse HTTP status: %w", err)
-	}
-	headerStart := match[0]
-	blank := strings.Index(normalized[headerStart:], "\n\n")
-	if blank < 0 {
-		return &apiResponse{Status: status, Headers: normalized[headerStart:], Body: nil}, nil
-	}
-	bodyStart := headerStart + blank + 2
-	return &apiResponse{
-		Status:  status,
-		Headers: normalized[headerStart:bodyStart],
-		Body:    []byte(normalized[bodyStart:]),
-	}, nil
-}
-
-func classifyRequestError(method, endpoint string, write bool, stdout, stderr []byte, err error) error {
-	status := 0
-	headers := ""
-	message := strings.TrimSpace(strings.Join([]string{string(stdout), string(stderr)}, "\n"))
-	if resp, parseErr := parseIncludedResponse(stdout); parseErr == nil {
-		status = resp.Status
-		headers = resp.Headers
-		if body := strings.TrimSpace(string(resp.Body)); body != "" {
-			message = body
-		}
-	}
-	if status == 0 {
-		if match := stderrStatusRE.FindStringSubmatch(string(stderr)); len(match) == 2 {
-			status, _ = strconv.Atoi(match[1])
-		}
-	}
-	return &APIError{
-		Method:         method,
-		Endpoint:       endpoint,
-		Status:         status,
-		Message:        message,
-		Headers:        headers,
-		OutcomeUnknown: write && (status == 0 || status >= 500),
-		Err:            err,
-	}
-}
-
-func unexpectedStatus(method, endpoint string, resp *apiResponse, expected int, write bool) error {
+func unexpectedStatus(method, endpoint string, resp *Response, expected int, write bool) error {
 	return &APIError{
 		Method:         method,
 		Endpoint:       endpoint,

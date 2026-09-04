@@ -65,7 +65,7 @@ func landImpl(app *AppContext, style string) error {
 	}
 
 	// 5. Discover stack.
-	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	st, err := stack.Discover(app.Git, app.Args.Base, app.Args.Head)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func landImpl(app *AppContext, style string) error {
 	fmt.Println()
 
 	// 8. Verify the stack against GitHub with check_base=true.
-	if err := stack.Verify(st, true); err != nil {
+	if err := stack.VerifyWithProvider(st, true, app.PR.View); err != nil {
 		return err
 	}
 
@@ -106,7 +106,7 @@ func nativeLandPreflight(app *AppContext, style string) error {
 		return nil
 	}
 
-	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	st, err := stack.Discover(app.Git, app.Args.Base, app.Args.Head)
 	if err != nil {
 		return err
 	}
@@ -138,7 +138,7 @@ func nativeLandPreflight(app *AppContext, style string) error {
 		return fmt.Errorf("cannot resolve owner/repo for native landing check: %w", err)
 	}
 
-	client := nativestacks.NewAPIClient(owner, repo)
+	client := app.PR.NativeStacks(owner, repo)
 	memberships, stacks, err := client.LoadMembership(prNumbers)
 	if err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {
@@ -192,7 +192,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 	if err := app.Git.Checkout(app.Args.Remote+"/"+bottom.Head(), bottom.Head()); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout remote branch while landing: %w", err)
 	}
-	if err := pr.EditBase(bottom.PR(), app.Args.Target); err != nil {
+	if err := app.PR.EditBase(bottom.PR(), app.Args.Target); err != nil {
 		return fmt.Errorf("ERROR: Cannot set base on bottom PR: %w", err)
 	}
 
@@ -207,7 +207,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 	if squashBody == "" {
 		squashBody = " "
 	}
-	if err := pr.MergeSquash(bottom.PR(), squashTitle, []byte(squashBody)); err != nil {
+	if err := app.PR.MergeSquash(bottom.PR(), squashTitle, []byte(squashBody)); err != nil {
 		return fmt.Errorf("ERROR: Cannot merge bottom PR: %w", err)
 	}
 
@@ -238,7 +238,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 
 		// Set the new bottom PR base to target.
 		newBottom := remaining[0]
-		if err := pr.EditBase(newBottom.PR(), app.Args.Target); err != nil {
+		if err := app.PR.EditBase(newBottom.PR(), app.Args.Target); err != nil {
 			return fmt.Errorf("ERROR: Cannot update new bottom PR base: %w", err)
 		}
 	}
@@ -257,7 +257,7 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot resolve owner/repo from remote %q: %w", app.Args.Remote, err)
 	}
-	allowed, err := pr.RebaseMergeAllowed(owner, repo)
+	allowed, err := app.PR.RebaseMergeAllowed(owner, repo)
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot query repository merge settings: %w", err)
 	}
@@ -265,7 +265,7 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 		return fmt.Errorf("ERROR: Repository %s/%s does not allow rebase merges. Enable rebase merges in repository settings or use land.style = bottom-only.", owner, repo)
 	}
 
-	mqStatus, err := pr.MergeQueueEnabled(owner, repo, app.Args.Target)
+	mqStatus, err := app.PR.MergeQueueEnabled(owner, repo, app.Args.Target)
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot query repository merge queue settings: %w", err)
 	}
@@ -278,10 +278,10 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 	}
 
 	tip := st.Top()
-	if err := pr.EditBase(tip.PR(), app.Args.Target); err != nil {
+	if err := app.PR.EditBase(tip.PR(), app.Args.Target); err != nil {
 		return fmt.Errorf("ERROR: Cannot set base on tip PR: %w", err)
 	}
-	if err := pr.MergeRebaseAuto(tip.PR()); err != nil {
+	if err := app.PR.MergeRebaseAuto(tip.PR()); err != nil {
 		return err
 	}
 

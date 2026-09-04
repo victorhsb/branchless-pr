@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
 func createCommentsTestRepo(t *testing.T) (repoDir, base, head string) {
@@ -47,6 +50,7 @@ func commentsTestApp(repoDir, base, head string) *AppContext {
 			Target:             "main",
 			BranchNameTemplate: "$USERNAME/stack",
 		},
+		Git:        git.New(repoDir, shell.Default{}),
 		RepoRoot:   repoDir,
 		Username:   "alice",
 		OrigBranch: "main",

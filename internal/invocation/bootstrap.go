@@ -9,6 +9,7 @@ import (
 
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
@@ -17,7 +18,8 @@ import (
 // Cobra commands are registered; Start resolves the command-specific state
 // after flags have been parsed.
 type Bootstrap struct {
-	run      shell.Runner
+	repo     *git.Repo
+	client   *pr.Client
 	Config   *config.Config
 	repoRoot string
 }
@@ -43,17 +45,22 @@ func NewBootstrap(run shell.Runner, agentOnly bool) (*Bootstrap, error) {
 	if run == nil {
 		run = shell.Default{}
 	}
-	b := &Bootstrap{run: run, Config: config.Defaults()}
+	b := &Bootstrap{
+		repo:   git.New("", run),
+		client: pr.NewClient(run),
+		Config: config.Defaults(),
+	}
 	if agentOnly {
 		return b, nil
 	}
 
 	if os.Getenv("STACKPR_CONFIG") == "" {
-		root, err := git.New("", run).RepoRoot()
+		root, err := b.repo.RepoRoot()
 		if err != nil {
 			return nil, fmt.Errorf("unable to locate repo root: %w", err)
 		}
 		b.repoRoot = root
+		b.repo.Dir = root
 	}
 	cfgPath, err := config.FilePath(b.repoRoot)
 	if err != nil {
@@ -71,7 +78,11 @@ func NewBootstrap(run shell.Runner, agentOnly bool) (*Bootstrap, error) {
 // Start resolves runtime state for one command invocation.
 func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 	if opts.Policy.AgentOnly {
-		return &AppContext{Config: b.Config, Git: git.New("", b.run)}, nil
+		return &AppContext{
+			Config: b.Config,
+			Git:    b.repo,
+			PR:     b.client,
+		}, nil
 	}
 	if opts.Stderr == nil {
 		opts.Stderr = os.Stderr
@@ -87,28 +98,28 @@ func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 		slog.SetDefault(slog.New(slog.NewTextHandler(opts.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	}
 
-	discovery := git.New("", b.run)
-	if err := discovery.CheckGHInstalled(); err != nil {
+	if err := b.client.CheckGHInstalled(); err != nil {
 		return nil, err
 	}
 	repoRoot := b.repoRoot
 	if repoRoot == "" {
-		repoRoot, err = discovery.RepoRoot()
+		repoRoot, err = b.repo.RepoRoot()
 		if err != nil {
 			return nil, err
 		}
+		b.repoRoot = repoRoot
+		b.repo.Dir = repoRoot
 	}
-	repo := git.New(repoRoot, b.run)
-	origBranch, err := repo.CurrentBranchName()
+	origBranch, err := b.repo.CurrentBranchName()
 	if err != nil {
 		return nil, err
 	}
 	if !opts.HeadExplicit {
-		if branchlessHead, ok := repo.BranchlessStackHead(); ok {
+		if branchlessHead, ok := b.repo.BranchlessStackHead(); ok {
 			opts.Args.Head = branchlessHead
 		}
 	}
-	username, err := repo.GetGHUsername()
+	username, err := b.client.GetGHUsername()
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +127,8 @@ func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 	app := &AppContext{
 		Config:     b.Config,
 		Args:       opts.Args,
-		Git:        repo,
+		Git:        b.repo,
+		PR:         b.client,
 		RepoRoot:   repoRoot,
 		Username:   username,
 		OrigBranch: origBranch,
@@ -126,7 +138,7 @@ func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 	}
 
 	if opts.Policy.UsesStash && opts.Stash && !opts.DryRun {
-		stash, err := repo.StashSave("stack-pr auto-stash")
+		stash, err := b.repo.StashSave("stack-pr auto-stash")
 		if err != nil {
 			return nil, fmt.Errorf("failed to stash changes: %w", err)
 		}
@@ -143,14 +155,14 @@ func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 		}()
 	}
 	if !opts.Policy.AllowsDirty {
-		if err := RequireCleanRepo(repo); err != nil {
+		if err := RequireCleanRepo(b.repo); err != nil {
 			return nil, err
 		}
 	}
 	if opts.Policy.RequiresTarget {
-		if err := repo.TargetExists(opts.Args.Remote, opts.Args.Target); err != nil {
+		if err := b.repo.TargetExists(opts.Args.Remote, opts.Args.Target); err != nil {
 			if opts.Args.Target == "main" {
-				if masterErr := repo.TargetExists(opts.Args.Remote, "master"); masterErr == nil {
+				if masterErr := b.repo.TargetExists(opts.Args.Remote, "master"); masterErr == nil {
 					fmt.Fprintln(opts.Stderr, "Hint: target branch 'main' not found, but 'master' exists on remote. Use --target master if applicable.")
 				}
 			}
@@ -158,7 +170,7 @@ func (b *Bootstrap) Start(opts BootstrapOptions) (_ *AppContext, err error) {
 		}
 	}
 	if opts.Policy.RequiresTarget && opts.Args.Base == "" {
-		mergeBase, err := repo.MergeBase(opts.Args.Head, opts.Args.Remote+"/"+opts.Args.Target)
+		mergeBase, err := b.repo.MergeBase(opts.Args.Head, opts.Args.Remote+"/"+opts.Args.Target)
 		if err != nil {
 			return nil, fmt.Errorf("unable to deduce base merge-base: %w", err)
 		}

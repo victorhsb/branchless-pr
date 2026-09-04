@@ -202,7 +202,7 @@ func validateSubmitPreconditions(app *AppContext, opts submitOptions) error {
 }
 
 func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, []bool, []bool, error) {
-	st, err := stack.Discover(app.Args.Base, app.Args.Head)
+	st, err := stack.Discover(app.Git, app.Args.Base, app.Args.Head)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -231,7 +231,7 @@ func discoverAndPrepareStack(app *AppContext, opts submitOptions) (stack.Stack, 
 		return nil, nil, nil, err
 	}
 	tmpl := stack.ParseTemplate(app.Args.BranchNameTemplate)
-	if err := st.AssignHeads(tmpl, app.Username, app.OrigBranch, app.Args.Remote); err != nil {
+	if err := st.AssignHeads(app.Git, tmpl, app.Username, app.OrigBranch, app.Args.Remote); err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -250,7 +250,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		needsBranchRebase, _ = app.Git.IsAncestor(top.Head(), app.OrigBranch)
 	}
 
-	tmpDraftPRs, err := tempDraftAndResetBases(st, app.Args.Target, nativeStackedPRs)
+	tmpDraftPRs, err := tempDraftAndResetBases(app.PR, st, app.Args.Target, nativeStackedPRs)
 	if err != nil {
 		return err
 	}
@@ -276,14 +276,14 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 			Reviewer: opts.Reviewer,
 			Draft:    isDraft[i],
 		}
-		prURL, err := pr.Create(prOpts)
+		prURL, err := app.PR.Create(prOpts)
 		if err != nil {
 			return fmt.Errorf("ERROR: Cannot create a PR: %w", err)
 		}
 		e.SetPR(prURL)
 	}
 
-	if err := stack.Verify(st, false); err != nil {
+	if err := stack.VerifyWithProvider(st, false, app.PR.View); err != nil {
 		return err
 	}
 
@@ -305,7 +305,7 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		}
 		existingBody := ""
 		if opts.KeepBody {
-			info, err := pr.View(e.PR())
+			info, err := app.PR.View(e.PR())
 			if err != nil {
 				return fmt.Errorf("ERROR: Cannot fetch PR body: %w", err)
 			}
@@ -314,18 +314,18 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		body := stack.BuildPRBody(e, st, opts.KeepBody, existingBody)
 		prNum, _ := e.PRNumber()
 		if nativeStackedPRs[prNum] {
-			if err := pr.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
+			if err := app.PR.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
 				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
 			}
 		} else {
-			if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
+			if err := app.PR.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
 				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
 			}
 		}
 	}
 
 	for _, prRef := range tmpDraftPRs {
-		if err := pr.Ready(prRef); err != nil {
+		if err := app.PR.Ready(prRef); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to mark PR %s ready: %v\n", prRef, err)
 		}
 	}
@@ -359,11 +359,11 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		needsBranchRebase, _ = app.Git.IsAncestor(top.Head(), app.OrigBranch)
 	}
 
-	cache, err := newSubmitPRStateCache(st)
+	cache, err := newSubmitPRStateCache(app.PR, st)
 	if err != nil {
 		return fmt.Errorf("ERROR: Cannot fetch PR state: %w", err)
 	}
-	tmpDraftPRs, err := tempDraftAndResetBasesOptimized(st, app.Args.Target, cache, nativeStackedPRs)
+	tmpDraftPRs, err := tempDraftAndResetBasesOptimized(app.PR, st, app.Args.Target, cache, nativeStackedPRs)
 	if err != nil {
 		return err
 	}
@@ -389,7 +389,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 			Reviewer: opts.Reviewer,
 			Draft:    isDraft[i],
 		}
-		prURL, err := pr.Create(prOpts)
+		prURL, err := app.PR.Create(prOpts)
 		if err != nil {
 			return fmt.Errorf("ERROR: Cannot create a PR: %w", err)
 		}
@@ -447,11 +447,11 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		}
 		prNum, _ := e.PRNumber()
 		if nativeStackedPRs[prNum] {
-			if err := pr.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
+			if err := app.PR.EditTitleBody(e.PR(), e.Commit.Title, body); err != nil {
 				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
 			}
 		} else {
-			if err := pr.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
+			if err := app.PR.Edit(e.PR(), e.Commit.Title, e.Base(), body); err != nil {
 				return fmt.Errorf("ERROR: Cannot update PR: %w", err)
 			}
 		}
@@ -459,7 +459,7 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 	}
 
 	for _, prRef := range tmpDraftPRs {
-		if err := pr.Ready(prRef); err != nil {
+		if err := app.PR.Ready(prRef); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to mark PR %s ready: %v\n", prRef, err)
 			continue
 		}
@@ -494,7 +494,7 @@ func initializeStackBranches(repo *git.Repo, st stack.Stack) error {
 	return nil
 }
 
-func tempDraftAndResetBases(st stack.Stack, target string, nativeStackedPRs map[int]bool) ([]string, error) {
+func tempDraftAndResetBases(client *pr.Client, st stack.Stack, target string, nativeStackedPRs map[int]bool) ([]string, error) {
 	var tmpDraftPRs []string
 	for _, e := range st {
 		if !e.HasPR() {
@@ -504,18 +504,18 @@ func tempDraftAndResetBases(st stack.Stack, target string, nativeStackedPRs map[
 		if nativeStackedPRs[prNum] {
 			continue
 		}
-		info, err := pr.View(e.PR())
+		info, err := client.View(e.PR())
 		if err != nil {
 			return nil, fmt.Errorf("ERROR: Cannot verify stack: %w", err)
 		}
 		if !info.IsDraft {
-			if err := pr.ReadyUndo(e.PR()); err != nil {
+			if err := client.ReadyUndo(e.PR()); err != nil {
 				return nil, fmt.Errorf("ERROR: Cannot update PR draft state: %w", err)
 			}
 			e.IsTmpDraft = true
 			tmpDraftPRs = append(tmpDraftPRs, e.PR())
 		}
-		if err := pr.EditBase(e.PR(), target); err != nil {
+		if err := client.EditBase(e.PR(), target); err != nil {
 			if pr.IsNativeStackBaseError(err) {
 				continue
 			}
@@ -525,7 +525,7 @@ func tempDraftAndResetBases(st stack.Stack, target string, nativeStackedPRs map[
 	return tmpDraftPRs, nil
 }
 
-func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submitPRStateCache, nativeStackedPRs map[int]bool) ([]string, error) {
+func tempDraftAndResetBasesOptimized(client *pr.Client, st stack.Stack, target string, cache *submitPRStateCache, nativeStackedPRs map[int]bool) ([]string, error) {
 	var tmpDraftPRs []string
 	for _, e := range st {
 		if !e.HasPR() {
@@ -540,7 +540,7 @@ func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submi
 			return nil, fmt.Errorf("ERROR: Cannot verify stack: %w", err)
 		}
 		if !info.IsDraft {
-			if err := pr.ReadyUndo(e.PR()); err != nil {
+			if err := client.ReadyUndo(e.PR()); err != nil {
 				return nil, fmt.Errorf("ERROR: Cannot update PR draft state: %w", err)
 			}
 			e.IsTmpDraft = true
@@ -548,7 +548,7 @@ func tempDraftAndResetBasesOptimized(st stack.Stack, target string, cache *submi
 			cache.updateDraft(e.PR(), true)
 		}
 		if info.BaseRefName != target {
-			if err := pr.EditBase(e.PR(), target); err != nil {
+			if err := client.EditBase(e.PR(), target); err != nil {
 				if pr.IsNativeStackBaseError(err) {
 					continue
 				}
@@ -597,32 +597,36 @@ func amendCommitMetadataChanged(repo *git.Repo, st stack.Stack, needsMeta []bool
 }
 
 type submitPRStateCache struct {
-	infos map[string]*pr.Info
+	client *pr.Client
+	infos  map[string]*pr.Info
 }
 
-func newSubmitPRStateCache(st stack.Stack) (*submitPRStateCache, error) {
+func newSubmitPRStateCache(client *pr.Client, st stack.Stack) (*submitPRStateCache, error) {
 	refs := make([]string, 0, len(st))
 	for _, e := range st {
 		if e.HasPR() {
 			refs = append(refs, e.PR())
 		}
 	}
-	infos, err := pr.LoadForSubmit(refs)
+	infos, err := client.LoadForSubmit(refs)
 	if err != nil {
 		return nil, err
 	}
-	return &submitPRStateCache{infos: infos}, nil
+	return &submitPRStateCache{client: client, infos: infos}, nil
 }
 
 func (c *submitPRStateCache) get(prRef string) (*pr.Info, error) {
 	info, ok := c.infos[prRef]
 	if !ok {
-		info, err := pr.View(prRef)
+		if c.client == nil {
+			return nil, fmt.Errorf("PR state for %s was not preloaded", prRef)
+		}
+		var err error
+		info, err = c.client.View(prRef)
 		if err != nil {
 			return nil, err
 		}
 		c.infos[prRef] = info
-		return info, nil
 	}
 	return info, nil
 }
