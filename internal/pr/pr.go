@@ -290,17 +290,15 @@ func (c *Client) MergeRebase(prRef string) error {
 // (false, err) on any API/network failure so the caller can surface the
 // underlying error rather than silently falling back.
 func (c *Client) RebaseMergeAllowed(owner, repo string) (bool, error) {
-	return rebaseMergeAllowedWith(owner, repo, c.ghAPIGraphQL)
-}
-
-type graphqlRunner func(query string, fields map[string]string) ([]byte, error)
-
-func rebaseMergeAllowedWith(owner, repo string, run graphqlRunner) (bool, error) {
 	const query = `query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { rebaseMergeAllowed } }`
-	out, err := run(query, map[string]string{"owner": owner, "repo": repo})
+	out, err := c.ghAPIGraphQL(query, map[string]string{"owner": owner, "repo": repo})
 	if err != nil {
 		return false, fmt.Errorf("query rebaseMergeAllowed: %w", err)
 	}
+	return parseRebaseMergeAllowed(out)
+}
+
+func parseRebaseMergeAllowed(out []byte) (bool, error) {
 	var resp struct {
 		Data struct {
 			Repository struct {
@@ -334,28 +332,26 @@ const (
 // It prefers the REST rules API and returns MergeQueueStatusUnknown when the API
 // cannot provide a reliable answer.
 func (c *Client) MergeQueueEnabled(owner, repo, targetBranch string) (MergeQueueStatus, error) {
-	return mergeQueueEnabledWith(owner, repo, targetBranch, c.ghAPIRules)
-}
-
-type rulesRunner func(owner, repo, branch string) ([]byte, error)
-
-func mergeQueueEnabledWith(owner, repo, targetBranch string, run rulesRunner) (MergeQueueStatus, error) {
-	out, err := run(owner, repo, targetBranch)
+	out, err := c.ghAPIRules(owner, repo, targetBranch)
 	if err != nil {
 		return MergeQueueStatusUnknown, nil // cannot confirm support
 	}
+	return parseMergeQueueRules(out), nil
+}
+
+func parseMergeQueueRules(out []byte) MergeQueueStatus {
 	var rules []struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(out, &rules); err != nil {
-		return MergeQueueStatusUnknown, nil // cannot confirm support
+		return MergeQueueStatusUnknown
 	}
 	for _, r := range rules {
 		if r.Type == "merge_queue" {
-			return MergeQueueStatusEnabled, nil
+			return MergeQueueStatusEnabled
 		}
 	}
-	return MergeQueueStatusDisabled, nil
+	return MergeQueueStatusDisabled
 }
 
 func (c *Client) ghAPIRules(owner, repo, branch string) ([]byte, error) {

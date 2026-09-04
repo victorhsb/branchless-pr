@@ -87,7 +87,7 @@ func nativeSubmitPreflight(app *AppContext, st stack.Stack, mode config.NativeSt
 		return nil, fmt.Errorf("cannot resolve owner/repo for native submit: %w", err)
 	}
 
-	client := app.PR.NativeStacks(owner, repo)
+	client := nativestacks.NewAPIClient(owner, repo, app.PR)
 	return nativeSubmitPreflightWithClient(st, mode, client, owner, repo)
 }
 

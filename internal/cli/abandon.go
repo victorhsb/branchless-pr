@@ -56,7 +56,7 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 		return fmt.Errorf("cannot resolve owner/repo for native abandon check: %w", err)
 	}
 
-	client := app.PR.NativeStacks(owner, repo)
+	client := nativestacks.NewAPIClient(owner, repo, app.PR)
 	memberships, stacks, err := client.LoadMembership(prNumbers)
 	if err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {
@@ -145,7 +145,7 @@ func abandonImpl(app *AppContext) error {
 	}
 	// Materialize local branches for each entry pointing at its commit.
 	for _, e := range st {
-		if err := app.Git.Checkout(e.Commit.SHA, e.Head()); err != nil {
+		if err := app.Git.Checkout(e.Head(), e.Commit.SHA); err != nil {
 			return err
 		}
 	}

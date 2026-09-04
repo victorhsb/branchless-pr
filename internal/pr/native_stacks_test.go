@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
@@ -58,9 +57,9 @@ func TestNativeStacksRequestPreservesStatusAndWriteUncertainty(t *testing.T) {
 				ExitCode: 1,
 			})
 			_, err := NewClient(run).Request("POST", "repos/acme/widget/stacks", nil, tc.write)
-			var apiErr *nativestacks.APIError
+			var apiErr *APIError
 			if !errors.As(err, &apiErr) {
-				t.Fatalf("error = %T, want *nativestacks.APIError", err)
+				t.Fatalf("error = %T, want *pr.APIError", err)
 			}
 			if apiErr.Status != tc.status || apiErr.OutcomeUnknown != tc.outcomeUnknown {
 				t.Fatalf("APIError = %+v", apiErr)

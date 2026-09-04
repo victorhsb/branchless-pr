@@ -138,7 +138,7 @@ func nativeLandPreflight(app *AppContext, style string) error {
 		return fmt.Errorf("cannot resolve owner/repo for native landing check: %w", err)
 	}
 
-	client := app.PR.NativeStacks(owner, repo)
+	client := nativestacks.NewAPIClient(owner, repo, app.PR)
 	memberships, stacks, err := client.LoadMembership(prNumbers)
 	if err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {
@@ -189,7 +189,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
-	if err := app.Git.Checkout(app.Args.Remote+"/"+bottom.Head(), bottom.Head()); err != nil {
+	if err := app.Git.Checkout(bottom.Head(), app.Args.Remote+"/"+bottom.Head()); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout remote branch while landing: %w", err)
 	}
 	if err := app.PR.EditBase(bottom.PR(), app.Args.Target); err != nil {
@@ -225,7 +225,7 @@ func landBottomOnly(app *AppContext, st stack.Stack) error {
 			if err := app.Git.Fetch(app.Args.Remote); err != nil {
 				return err
 			}
-			if err := app.Git.Checkout(app.Args.Remote+"/"+e.Head(), e.Head()); err != nil {
+			if err := app.Git.Checkout(e.Head(), app.Args.Remote+"/"+e.Head()); err != nil {
 				return fmt.Errorf("ERROR: Cannot checkout remote branch %q while landing: %w", e.Head(), err)
 			}
 			if err := app.Git.RebaseWithAuthorDate(remoteTarget, e.Head()); err != nil {

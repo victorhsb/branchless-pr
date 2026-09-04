@@ -163,7 +163,7 @@ func loadNativeMembership(app *AppContext, st stack.Stack, mode config.NativeSta
 		return fmt.Errorf("cannot resolve owner/repo for native membership: %w", err)
 	}
 
-	client := app.PR.NativeStacks(owner, repo)
+	client := nativestacks.NewAPIClient(owner, repo, app.PR)
 	memberships, _, err := client.LoadMembership(prNumbers)
 	if err != nil {
 		if nativestacks.IsFeatureUnavailable(err) {

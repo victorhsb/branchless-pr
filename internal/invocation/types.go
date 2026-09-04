@@ -130,15 +130,12 @@ func DefaultReviewer(cfg *config.Config, arg string) string {
 
 // RequireCleanRepo exits with an error if the working tree has tracked changes.
 func RequireCleanRepo(repo *git.Repo) error {
-	changes, err := repo.UncommittedChanges()
+	dirty, err := repo.HasTrackedChanges()
 	if err != nil {
 		return err
 	}
-	for status := range changes {
-		// Ignore untracked files (status starts with "??").
-		if status != "??" {
-			return fmt.Errorf("ERROR: working tree is not clean; tracked/staged/unstaged changes exist")
-		}
+	if dirty {
+		return fmt.Errorf("ERROR: working tree is not clean; tracked/staged/unstaged changes exist")
 	}
 	return nil
 }

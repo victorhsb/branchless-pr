@@ -1,13 +1,13 @@
 package pr
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
@@ -16,16 +16,55 @@ var (
 	stderrStatusRE   = regexp.MustCompile(`(?i)\bHTTP[ /]+([0-9]{3})\b`)
 )
 
-var _ nativestacks.Transport = (*Client)(nil)
+// APIResponse is the status-preserving result of one GitHub API request.
+type APIResponse struct {
+	Status  int
+	Headers string
+	Body    []byte
+}
 
-// NativeStacks returns native Stack domain operations scoped to owner/repo and
-// backed by this client's GitHub transport.
-func (c *Client) NativeStacks(owner, repo string) *nativestacks.APIClient {
-	return nativestacks.NewAPIClient(owner, repo, c)
+// APIError preserves API operation context and whether a failed write may have
+// reached GitHub.
+type APIError struct {
+	Method         string
+	Endpoint       string
+	Status         int
+	Message        string
+	Headers        string
+	OutcomeUnknown bool
+	Err            error
+}
+
+func (e *APIError) Error() string {
+	var parts []string
+	if e.Method != "" || e.Endpoint != "" {
+		parts = append(parts, strings.TrimSpace(e.Method+" "+e.Endpoint))
+	}
+	if e.Status != 0 {
+		parts = append(parts, fmt.Sprintf("HTTP %d", e.Status))
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		parts = append(parts, strings.TrimSpace(e.Message))
+	}
+	if e.Err != nil {
+		parts = append(parts, e.Err.Error())
+	}
+	if len(parts) == 0 {
+		return "GitHub API request failed"
+	}
+	return strings.Join(parts, ": ")
+}
+
+func (e *APIError) Unwrap() error { return e.Err }
+
+// IsAPIStatus reports whether an error chain contains the given HTTP status.
+func IsAPIStatus(err error, status int) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == status
 }
 
 // Request performs one status-preserving GitHub REST request.
-func (c *Client) Request(method, endpoint string, body []byte, write bool) (*nativestacks.Response, error) {
+func (c *Client) Request(method, endpoint string, body []byte, write bool) (*APIResponse, error) {
 	args := []string{"gh", "api", "--include", "--method", method, endpoint}
 	opts := shell.RunOpts{Quiet: true}
 	if body != nil {
@@ -38,7 +77,7 @@ func (c *Client) Request(method, endpoint string, body []byte, write bool) (*nat
 	}
 	resp, parseErr := parseIncludedResponse(stdout)
 	if parseErr != nil {
-		return nil, &nativestacks.APIError{
+		return nil, &APIError{
 			Method:         method,
 			Endpoint:       endpoint,
 			Message:        parseErr.Error(),
@@ -59,7 +98,7 @@ func (c *Client) Paginate(endpoint string) ([]byte, error) {
 }
 
 // GraphQL performs one status-preserving GraphQL request for native Stacks.
-func (c *Client) GraphQL(query string, fields map[string]string) (*nativestacks.Response, error) {
+func (c *Client) GraphQL(query string, fields map[string]string) (*APIResponse, error) {
 	args := []string{"gh", "api", "--include", "--method", "POST", "graphql", "-f", "query=" + query}
 	for _, key := range []string{"owner", "repo"} {
 		if value, ok := fields[key]; ok {
@@ -86,7 +125,7 @@ func (c *Client) GraphQL(query string, fields map[string]string) (*nativestacks.
 	}
 	resp, parseErr := parseIncludedResponse(stdout)
 	if parseErr != nil {
-		return nil, &nativestacks.APIError{
+		return nil, &APIError{
 			Method:   "POST",
 			Endpoint: "graphql",
 			Message:  parseErr.Error(),
@@ -95,7 +134,7 @@ func (c *Client) GraphQL(query string, fields map[string]string) (*nativestacks.
 	return resp, nil
 }
 
-func parseIncludedResponse(out []byte) (*nativestacks.Response, error) {
+func parseIncludedResponse(out []byte) (*APIResponse, error) {
 	normalized := strings.ReplaceAll(string(out), "\r\n", "\n")
 	matches := includedStatusRE.FindAllStringSubmatchIndex(normalized, -1)
 	if len(matches) == 0 {
@@ -109,10 +148,10 @@ func parseIncludedResponse(out []byte) (*nativestacks.Response, error) {
 	headerStart := match[0]
 	blank := strings.Index(normalized[headerStart:], "\n\n")
 	if blank < 0 {
-		return &nativestacks.Response{Status: status, Headers: normalized[headerStart:]}, nil
+		return &APIResponse{Status: status, Headers: normalized[headerStart:]}, nil
 	}
 	bodyStart := headerStart + blank + 2
-	return &nativestacks.Response{
+	return &APIResponse{
 		Status:  status,
 		Headers: normalized[headerStart:bodyStart],
 		Body:    []byte(normalized[bodyStart:]),
@@ -135,7 +174,7 @@ func classifyNativeRequestError(method, endpoint string, write bool, stdout, std
 			status, _ = strconv.Atoi(match[1])
 		}
 	}
-	return &nativestacks.APIError{
+	return &APIError{
 		Method:         method,
 		Endpoint:       endpoint,
 		Status:         status,

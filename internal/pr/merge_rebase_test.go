@@ -19,27 +19,29 @@ func TestMergeRebaseInvokesGh(t *testing.T) {
 }
 
 func TestRebaseMergeAllowedReturnsTrue(t *testing.T) {
-	got, err := rebaseMergeAllowedWith("acme", "widget", func(query string, fields map[string]string) ([]byte, error) {
-		if !strings.Contains(query, "rebaseMergeAllowed") {
-			t.Fatalf("query missing rebaseMergeAllowed: %q", query)
-		}
-		if fields["owner"] != "acme" || fields["repo"] != "widget" {
-			t.Fatalf("fields = %v, want acme/widget", fields)
-		}
-		return []byte(`{"data":{"repository":{"rebaseMergeAllowed":true}}}`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Prefix("gh", "api", "graphql", "-f", "query=query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) { rebaseMergeAllowed } }"),
+		Stdout: `{"data":{"repository":{"rebaseMergeAllowed":true}}}`,
 	})
+	got, err := NewClient(run).RebaseMergeAllowed("acme", "widget")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !got {
 		t.Fatalf("expected true, got false")
 	}
+	args := strings.Join(run.Calls()[0].Args, "\n")
+	if !strings.Contains(args, "owner=acme") || !strings.Contains(args, "repo=widget") {
+		t.Fatalf("args missing repository fields: %v", run.Calls()[0].Args)
+	}
 }
 
 func TestRebaseMergeAllowedReturnsFalse(t *testing.T) {
-	got, err := rebaseMergeAllowedWith("acme", "widget", func(query string, fields map[string]string) ([]byte, error) {
-		return []byte(`{"data":{"repository":{"rebaseMergeAllowed":false}}}`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Prefix("gh", "api", "graphql"),
+		Stdout: `{"data":{"repository":{"rebaseMergeAllowed":false}}}`,
 	})
+	got, err := NewClient(run).RebaseMergeAllowed("acme", "widget")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -49,28 +51,33 @@ func TestRebaseMergeAllowedReturnsFalse(t *testing.T) {
 }
 
 func TestRebaseMergeAllowedPropagatesAPIError(t *testing.T) {
-	want := errors.New("boom")
-	_, err := rebaseMergeAllowedWith("acme", "widget", func(query string, fields map[string]string) ([]byte, error) {
-		return nil, want
+	run := shelltest.New(t, shelltest.Response{
+		Match: shelltest.Prefix("gh", "api", "graphql"),
+		Err:   errors.New("boom"),
 	})
+	_, err := NewClient(run).RebaseMergeAllowed("acme", "widget")
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Fatalf("expected error containing %q, got %v", "boom", err)
 	}
 }
 
 func TestRebaseMergeAllowedSurfacesGraphQLErrors(t *testing.T) {
-	_, err := rebaseMergeAllowedWith("acme", "widget", func(query string, fields map[string]string) ([]byte, error) {
-		return []byte(`{"errors":[{"message":"Could not resolve to a Repository"}]}`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Prefix("gh", "api", "graphql"),
+		Stdout: `{"errors":[{"message":"Could not resolve to a Repository"}]}`,
 	})
+	_, err := NewClient(run).RebaseMergeAllowed("acme", "widget")
 	if err == nil || !strings.Contains(err.Error(), "Could not resolve") {
 		t.Fatalf("expected graphql error, got %v", err)
 	}
 }
 
 func TestRebaseMergeAllowedSurfacesParseErrors(t *testing.T) {
-	_, err := rebaseMergeAllowedWith("acme", "widget", func(query string, fields map[string]string) ([]byte, error) {
-		return []byte(`{not-json}`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Prefix("gh", "api", "graphql"),
+		Stdout: `{not-json}`,
 	})
+	_, err := NewClient(run).RebaseMergeAllowed("acme", "widget")
 	if err == nil || !strings.Contains(err.Error(), "parse") {
 		t.Fatalf("expected parse error, got %v", err)
 	}
@@ -104,9 +111,11 @@ func TestMergeRebaseAutoNormalizesDisabledQueueError(t *testing.T) {
 }
 
 func TestMergeQueueEnabledReturnsEnabled(t *testing.T) {
-	got, err := mergeQueueEnabledWith("acme", "widget", "main", func(owner, repo, branch string) ([]byte, error) {
-		return []byte(`[{"type":"merge_queue","parameters":{}}]`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+		Stdout: `[{"type":"merge_queue","parameters":{}}]`,
 	})
+	got, err := NewClient(run).MergeQueueEnabled("acme", "widget", "main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,9 +125,11 @@ func TestMergeQueueEnabledReturnsEnabled(t *testing.T) {
 }
 
 func TestMergeQueueEnabledReturnsDisabled(t *testing.T) {
-	got, err := mergeQueueEnabledWith("acme", "widget", "main", func(owner, repo, branch string) ([]byte, error) {
-		return []byte(`[{"type":"pull_request","parameters":{}}]`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+		Stdout: `[{"type":"pull_request","parameters":{}}]`,
 	})
+	got, err := NewClient(run).MergeQueueEnabled("acme", "widget", "main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,9 +139,11 @@ func TestMergeQueueEnabledReturnsDisabled(t *testing.T) {
 }
 
 func TestMergeQueueEnabledReturnsUnknownOnAPIError(t *testing.T) {
-	got, err := mergeQueueEnabledWith("acme", "widget", "main", func(owner, repo, branch string) ([]byte, error) {
-		return nil, errors.New("boom")
+	run := shelltest.New(t, shelltest.Response{
+		Match:    shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+		ExitCode: 1,
 	})
+	got, err := NewClient(run).MergeQueueEnabled("acme", "widget", "main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,9 +153,11 @@ func TestMergeQueueEnabledReturnsUnknownOnAPIError(t *testing.T) {
 }
 
 func TestMergeQueueEnabledReturnsUnknownOnParseError(t *testing.T) {
-	got, err := mergeQueueEnabledWith("acme", "widget", "main", func(owner, repo, branch string) ([]byte, error) {
-		return []byte(`{not-json}`), nil
+	run := shelltest.New(t, shelltest.Response{
+		Match:  shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+		Stdout: `{not-json}`,
 	})
+	got, err := NewClient(run).MergeQueueEnabled("acme", "widget", "main")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

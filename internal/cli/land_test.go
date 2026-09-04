@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -311,5 +312,54 @@ func TestLandWholeStackUnknownMergeQueueProceedsAndNormalizes(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--whole-stack only works for repositories with merge queue enabled") {
 		t.Fatalf("error = %v, want normalized merge-queue error", err)
+	}
+}
+
+func TestLandBottomOnlyChecksOutBottomFromRemoteBranch(t *testing.T) {
+	gitRun := shelltest.New(t,
+		shelltest.Response{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		shelltest.Response{
+			Match: shelltest.Exact("git", "checkout", "origin/alice/stack/1", "-B", "alice/stack/1"),
+			Err:   errors.New("stop after checkout"),
+		},
+	)
+	app := &AppContext{
+		Args: CommonArgs{Remote: "origin", Target: "main"},
+		Git:  git.New("", gitRun),
+		PR:   pr.NewClient(shelltest.New(t)),
+	}
+	err := landBottomOnly(app, stack.Stack{
+		entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "stop after checkout") {
+		t.Fatalf("error = %v, want checkout sentinel", err)
+	}
+}
+
+func TestLandBottomOnlyChecksOutRemainingEntryFromRemoteBranch(t *testing.T) {
+	gitRun := shelltest.New(t,
+		shelltest.Response{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		shelltest.Response{Match: shelltest.Exact("git", "checkout", "origin/alice/stack/1", "-B", "alice/stack/1")},
+		shelltest.Response{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		shelltest.Response{
+			Match: shelltest.Exact("git", "checkout", "origin/alice/stack/2", "-B", "alice/stack/2"),
+			Err:   errors.New("stop after remaining checkout"),
+		},
+	)
+	ghRun := shelltest.New(t,
+		shelltest.Response{Match: shelltest.Exact("gh", "pr", "edit", "https://github.com/acme/widget/pull/1", "-B", "main")},
+		shelltest.Response{Match: shelltest.Exact("gh", "pr", "merge", "https://github.com/acme/widget/pull/1", "--squash", "-t", "land test (#1)", "-F", "-")},
+	)
+	app := &AppContext{
+		Args: CommonArgs{Remote: "origin", Target: "main"},
+		Git:  git.New("", gitRun),
+		PR:   pr.NewClient(ghRun),
+	}
+	err := landBottomOnly(app, stack.Stack{
+		entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1"),
+		entryForLandTest("alice/stack/2", "https://github.com/acme/widget/pull/2"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "stop after remaining checkout") {
+		t.Fatalf("error = %v, want remaining checkout sentinel", err)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
 type runResult struct {
@@ -41,7 +43,7 @@ func queuedClient(t *testing.T, results ...runResult) (*APIClient, *[]recordedCa
 	return client, &transport.calls
 }
 
-func (t *queuedTransport) Request(method, endpoint string, body []byte, write bool) (*Response, error) {
+func (t *queuedTransport) Request(method, endpoint string, body []byte, write bool) (*pr.APIResponse, error) {
 	t.calls = append(t.calls, recordedCall{
 		args:  []string{"REQUEST", method, endpoint},
 		stdin: append([]byte(nil), body...),
@@ -59,7 +61,7 @@ func (t *queuedTransport) Paginate(endpoint string) ([]byte, error) {
 	return result.stdout, nil
 }
 
-func (t *queuedTransport) GraphQL(query string, fields map[string]string) (*Response, error) {
+func (t *queuedTransport) GraphQL(query string, fields map[string]string) (*pr.APIResponse, error) {
 	t.calls = append(t.calls, recordedCall{args: []string{"GRAPHQL", query}})
 	result := t.nextResult()
 	return testResponse("POST", "graphql", false, result)
@@ -75,7 +77,7 @@ func (t *queuedTransport) nextResult() runResult {
 	return result
 }
 
-func testResponse(method, endpoint string, write bool, result runResult) (*Response, error) {
+func testResponse(method, endpoint string, write bool, result runResult) (*pr.APIResponse, error) {
 	resp, parseErr := testParseIncludedResponse(result.stdout)
 	if result.err == nil {
 		return resp, parseErr
@@ -90,7 +92,7 @@ func testResponse(method, endpoint string, write bool, result runResult) (*Respo
 			message = body
 		}
 	}
-	return nil, &APIError{
+	return nil, &pr.APIError{
 		Method:         method,
 		Endpoint:       endpoint,
 		Status:         status,
@@ -101,7 +103,7 @@ func testResponse(method, endpoint string, write bool, result runResult) (*Respo
 	}
 }
 
-func testParseIncludedResponse(out []byte) (*Response, error) {
+func testParseIncludedResponse(out []byte) (*pr.APIResponse, error) {
 	normalized := strings.ReplaceAll(string(out), "\r\n", "\n")
 	statusLineEnd := strings.IndexByte(normalized, '\n')
 	if statusLineEnd < 0 {
@@ -117,9 +119,9 @@ func testParseIncludedResponse(out []byte) (*Response, error) {
 	}
 	blank := strings.Index(normalized, "\n\n")
 	if blank < 0 {
-		return &Response{Status: status, Headers: normalized}, nil
+		return &pr.APIResponse{Status: status, Headers: normalized}, nil
 	}
-	return &Response{
+	return &pr.APIResponse{
 		Status:  status,
 		Headers: normalized[:blank+2],
 		Body:    []byte(normalized[blank+2:]),
@@ -595,7 +597,7 @@ func TestValidationFailureIsNotRetried(t *testing.T) {
 		err:    errors.New("exit status 1"),
 	})
 	_, err := client.CreateStack([]int{10, 20})
-	if !IsAPIStatus(err, 422) {
+	if !pr.IsAPIStatus(err, 422) {
 		t.Fatalf("error = %v, want HTTP 422", err)
 	}
 	if len(*calls) != 1 {

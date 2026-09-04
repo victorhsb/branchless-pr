@@ -6,22 +6,19 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-)
 
-// Response is the transport-neutral result of one GitHub API request.
-type Response struct {
-	Status  int
-	Headers string
-	Body    []byte
-}
+	"github.com/victorhsb/branchless-pr/internal/pr"
+)
 
 // Transport supplies GitHub API responses without exposing subprocess details
 // to the native Stacks domain package.
 type Transport interface {
-	Request(method, endpoint string, body []byte, write bool) (*Response, error)
+	Request(method, endpoint string, body []byte, write bool) (*pr.APIResponse, error)
 	Paginate(endpoint string) ([]byte, error)
-	GraphQL(query string, fields map[string]string) (*Response, error)
+	GraphQL(query string, fields map[string]string) (*pr.APIResponse, error)
 }
+
+var _ Transport = (*pr.Client)(nil)
 
 // APIClient implements native Stacks domain operations over a GitHub transport.
 type APIClient struct {
@@ -55,7 +52,7 @@ func (c *APIClient) ProbeAvailability() error {
 		c.availabilityProbed = true
 		return nil
 	}
-	if IsAPIStatus(err, 404) {
+	if pr.IsAPIStatus(err, 404) {
 		return &FeatureUnavailable{Msg: "GitHub native Stacks is unavailable for this repository"}
 	}
 	return fmt.Errorf("probe native Stacks: %w", err)
@@ -101,7 +98,7 @@ func (c *APIClient) GetStack(number int) (*Stack, error) {
 	path := c.repoPath(fmt.Sprintf("stacks/%d", number))
 	resp, err := c.request("GET", path, nil, false)
 	if err != nil {
-		if IsAPIStatus(err, 404) {
+		if pr.IsAPIStatus(err, 404) {
 			return nil, &StackNotFound{Number: number, Err: err}
 		}
 		return nil, err
@@ -339,7 +336,7 @@ func (c *APIClient) CreateStack(prNumbers []int) (*Stack, error) {
 	}
 	s, err := decodeStack(resp.Body)
 	if err != nil {
-		return c.reconcileCreateFailure(prNumbers, &APIError{
+		return c.reconcileCreateFailure(prNumbers, &pr.APIError{
 			Method:         "POST",
 			Endpoint:       path,
 			Status:         resp.Status,
@@ -378,7 +375,7 @@ func (c *APIClient) AppendStack(stackNumber int, suffix, intended []int) (*Stack
 	}
 	s, err := decodeStack(resp.Body)
 	if err != nil {
-		return c.reconcileAppendFailure(stackNumber, intended, &APIError{
+		return c.reconcileAppendFailure(stackNumber, intended, &pr.APIError{
 			Method:         "POST",
 			Endpoint:       path,
 			Status:         resp.Status,
@@ -419,7 +416,7 @@ func (c *APIClient) Unstack(stackNumber int) (*UnstackResult, error) {
 	case 200:
 		s, err := decodeStack(resp.Body)
 		if err != nil {
-			return c.reconcileUnstackFailure(stackNumber, &APIError{
+			return c.reconcileUnstackFailure(stackNumber, &pr.APIError{
 				Method:         "POST",
 				Endpoint:       path,
 				Status:         resp.Status,
@@ -434,7 +431,7 @@ func (c *APIClient) Unstack(stackNumber int) (*UnstackResult, error) {
 }
 
 func (c *APIClient) reconcileCreateFailure(intended []int, writeErr error) (*Stack, error) {
-	var apiErr *APIError
+	var apiErr *pr.APIError
 	if !errors.As(writeErr, &apiErr) || !apiErr.OutcomeUnknown {
 		return nil, writeErr
 	}
@@ -452,7 +449,7 @@ func (c *APIClient) reconcileCreateFailure(intended []int, writeErr error) (*Sta
 }
 
 func (c *APIClient) reconcileAppendFailure(stackNumber int, intended []int, writeErr error) (*Stack, error) {
-	var apiErr *APIError
+	var apiErr *pr.APIError
 	if !errors.As(writeErr, &apiErr) || !apiErr.OutcomeUnknown {
 		return nil, writeErr
 	}
@@ -467,7 +464,7 @@ func (c *APIClient) reconcileAppendFailure(stackNumber int, intended []int, writ
 }
 
 func (c *APIClient) reconcileUnstackFailure(stackNumber int, writeErr error) (*UnstackResult, error) {
-	var apiErr *APIError
+	var apiErr *pr.APIError
 	if !errors.As(writeErr, &apiErr) || !apiErr.OutcomeUnknown {
 		return nil, writeErr
 	}
@@ -481,12 +478,12 @@ func (c *APIClient) reconcileUnstackFailure(stackNumber int, writeErr error) (*U
 	return &UnstackResult{Stack: s, Recovered: true}, nil
 }
 
-func (c *APIClient) request(method, endpoint string, body []byte, write bool) (*Response, error) {
+func (c *APIClient) request(method, endpoint string, body []byte, write bool) (*pr.APIResponse, error) {
 	return c.transport.Request(method, endpoint, body, write)
 }
 
-func unexpectedStatus(method, endpoint string, resp *Response, expected int, write bool) error {
-	return &APIError{
+func unexpectedStatus(method, endpoint string, resp *pr.APIResponse, expected int, write bool) error {
+	return &pr.APIError{
 		Method:         method,
 		Endpoint:       endpoint,
 		Status:         resp.Status,

@@ -166,13 +166,13 @@ func TestLocalWrappersRejectHostileArgumentsBeforeRunningGit(t *testing.T) {
 		{
 			name: "Checkout start point",
 			call: func(repo *Repo) error {
-				return repo.Checkout(hostile, "safe")
+				return repo.Checkout("safe", hostile)
 			},
 		},
 		{
 			name: "Checkout branch",
 			call: func(repo *Repo) error {
-				return repo.Checkout("HEAD", hostile)
+				return repo.Checkout(hostile, "HEAD")
 			},
 		},
 		{

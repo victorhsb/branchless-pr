@@ -2,12 +2,8 @@ package git
 
 import "fmt"
 
-const (
-	// NotARepo is the git exit code when run outside a repository.
-	NotARepo = 128
-	// SHALength is the length of a full Git SHA.
-	SHALength = 40
-)
+// SHALength is the length of a full Git SHA.
+const SHALength = 40
 
 // Error is returned for selected Git / gh helper failures.
 type Error struct {
