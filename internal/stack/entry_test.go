@@ -55,6 +55,23 @@ func TestTemplateMatchAndExtractID(t *testing.T) {
 	}
 }
 
+func TestNextIDIsPureOverRemoteBranches(t *testing.T) {
+	branches := []string{
+		"alice/stack/2",
+		"bob/stack/99",
+		"alice/other/7",
+		"alice/stack/not-a-number",
+		"alice/stack/5",
+	}
+
+	if got, want := NextID(branches, ParseTemplate("$USERNAME/stack"), "alice", "feature"), 6; got != want {
+		t.Fatalf("NextID = %d, want %d", got, want)
+	}
+	if got, want := NextID(nil, ParseTemplate("$USERNAME/stack"), "alice", "feature"), 1; got != want {
+		t.Fatalf("NextID with no branches = %d, want %d", got, want)
+	}
+}
+
 func TestReadMetadataParsesStackInfo(t *testing.T) {
 	h := &Header{
 		SHA:   "0123456789abcdef0123456789abcdef01234567",

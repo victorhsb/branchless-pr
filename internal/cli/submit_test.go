@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -13,7 +11,6 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/nativestacks"
 	"github.com/victorhsb/branchless-pr/internal/pr"
-	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -201,42 +198,37 @@ func TestUseExperimentalSubmitEngineSelection(t *testing.T) {
 }
 
 func TestTempDraftAndResetBasesOptimizedSkipsNoOps(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
-	logPath := installFakeGHLogger(t)
-
 	e := &stack.Entry{}
 	e.SetPR("https://github.com/acme/repo/pull/1")
 	cache := &submitPRStateCache{infos: map[string]*pr.Info{
 		e.PR(): {BaseRefName: "main", IsDraft: true},
 	}}
+	run := shelltest.New(t)
 
-	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", cache, nil)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(run), stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
 	if len(tmp) != 0 {
 		t.Fatalf("tmp draft PRs = %v, want none", tmp)
 	}
-	if got := readTestFile(t, logPath); got != "" {
-		t.Fatalf("gh commands = %q, want none", got)
+	if got := len(run.Calls()); got != 0 {
+		t.Fatalf("gh calls = %d, want none", got)
 	}
 }
 
 func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
-	logPath := installFakeGHLogger(t)
-
 	e := &stack.Entry{}
 	e.SetPR("https://github.com/acme/repo/pull/2")
 	cache := &submitPRStateCache{infos: map[string]*pr.Info{
 		e.PR(): {BaseRefName: "feature", IsDraft: false},
 	}}
+	run := shelltest.New(t,
+		shelltest.Response{Match: shelltest.Exact("gh", "pr", "ready", e.PR(), "--undo")},
+		shelltest.Response{Match: shelltest.Exact("gh", "pr", "edit", e.PR(), "-B", "main")},
+	)
 
-	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shell.Default{}), stack.Stack{e}, "main", cache, nil)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(run), stack.Stack{e}, "main", cache, nil)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -250,7 +242,7 @@ func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
 	if !info.IsDraft || info.BaseRefName != "main" {
 		t.Fatalf("cached info = %+v, want draft with base main", info)
 	}
-	log := readTestFile(t, logPath)
+	log := shellCallsLog(run)
 	mustContain(t, log, "pr ready https://github.com/acme/repo/pull/2 --undo")
 	mustContain(t, log, "pr edit https://github.com/acme/repo/pull/2 -B main")
 }
@@ -259,16 +251,12 @@ func TestTempDraftAndResetBasesOptimizedMutatesOnlyWhenNeeded(t *testing.T) {
 // in the nativeStackedPRs set, tempDraftAndResetBases skips both ReadyUndo
 // and EditBase entirely — GitHub manages bases server-side for stacked PRs.
 func TestTempDraftAndResetBasesSkipsNativeStackedPRs(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
-	logPath := installFakeGHLogger(t)
-
 	e := &stack.Entry{}
 	e.SetPR("https://github.com/acme/repo/pull/5")
 
 	nativeStacked := map[int]bool{5: true}
-	tmp, err := tempDraftAndResetBases(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", nativeStacked)
+	run := shelltest.New(t)
+	tmp, err := tempDraftAndResetBases(pr.NewClient(run), stack.Stack{e}, "main", nativeStacked)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBases returned error: %v", err)
 	}
@@ -278,19 +266,14 @@ func TestTempDraftAndResetBasesSkipsNativeStackedPRs(t *testing.T) {
 	if e.IsTmpDraft {
 		t.Fatalf("entry should not be marked tmp draft for native-stacked PR")
 	}
-	if got := readTestFile(t, logPath); got != "" {
-		t.Fatalf("gh commands = %q, want none (native-stacked PR should be skipped entirely)", got)
+	if got := len(run.Calls()); got != 0 {
+		t.Fatalf("gh calls = %d, want none (native-stacked PR should be skipped entirely)", got)
 	}
 }
 
 // TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs verifies the
 // optimized path also skips ReadyUndo and EditBase for native-stacked PRs.
 func TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
-	logPath := installFakeGHLogger(t)
-
 	e := &stack.Entry{}
 	e.SetPR("https://github.com/acme/repo/pull/7")
 	cache := &submitPRStateCache{infos: map[string]*pr.Info{
@@ -298,7 +281,8 @@ func TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs(t *testing.T) {
 	}}
 
 	nativeStacked := map[int]bool{7: true}
-	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(shelltest.New(t)), stack.Stack{e}, "main", cache, nativeStacked)
+	run := shelltest.New(t)
+	tmp, err := tempDraftAndResetBasesOptimized(pr.NewClient(run), stack.Stack{e}, "main", cache, nativeStacked)
 	if err != nil {
 		t.Fatalf("tempDraftAndResetBasesOptimized returned error: %v", err)
 	}
@@ -308,8 +292,8 @@ func TestTempDraftAndResetBasesOptimizedSkipsNativeStackedPRs(t *testing.T) {
 	if e.IsTmpDraft {
 		t.Fatalf("entry should not be marked tmp draft for native-stacked PR")
 	}
-	if got := readTestFile(t, logPath); got != "" {
-		t.Fatalf("gh commands = %q, want none (native-stacked PR should be skipped entirely)", got)
+	if got := len(run.Calls()); got != 0 {
+		t.Fatalf("gh calls = %d, want none (native-stacked PR should be skipped entirely)", got)
 	}
 }
 
@@ -450,34 +434,6 @@ func entryForSubmitTest(sha, head, base, title string) *stack.Entry {
 	e.SetHead(head)
 	e.SetBase(base)
 	return e
-}
-
-func installFakeGHLogger(t *testing.T) string {
-	t.Helper()
-	binDir := t.TempDir()
-	logPath := filepath.Join(binDir, "gh.log")
-	ghPath := filepath.Join(binDir, "gh")
-	script := `#!/bin/sh
-printf '%s\n' "$*" >> "$GH_LOG"
-`
-	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("GH_LOG", logPath)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return logPath
-}
-
-func readTestFile(t *testing.T, path string) string {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return ""
-	}
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	return string(b)
 }
 
 func mustContain(t *testing.T, haystack, needle string) {

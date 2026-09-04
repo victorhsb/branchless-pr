@@ -94,6 +94,26 @@ func TestResolveRemoteRefs(t *testing.T) {
 	}
 }
 
+func TestRemoteBranchesUsesValidatedSharedParser(t *testing.T) {
+	run := shelltest.New(t, shelltest.Response{
+		Match: shelltest.Exact("git", "ls-remote", "--heads", "--", "origin"),
+		Stdout: strings.Join([]string{
+			"def456\trefs/heads/z-last",
+			"malformed",
+			"abc123\trefs/heads/a-first",
+			"fff999\trefs/tags/not-a-branch",
+		}, "\n"),
+	})
+
+	got, err := New("", run).RemoteBranches("origin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a-first", "z-last"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("RemoteBranches = %v, want %v", got, want)
+	}
+}
+
 func TestForcePushWithLeaseUsesAtomicExplicitExpectations(t *testing.T) {
 	run := shelltest.New(t, shelltest.Response{
 		Match: shelltest.Exact(
@@ -316,7 +336,7 @@ func commitTestFile(t *testing.T, repo, name, contents string) string {
 	}
 	runGitForTest(t, repo, "add", name)
 	runGitForTest(t, repo, "commit", "-m", contents)
-	out, err := shell.Output([]string{"git", "rev-parse", "HEAD"}, shell.RunOpts{Dir: repo})
+	out, err := (shell.Default{}).Output([]string{"git", "rev-parse", "HEAD"}, shell.RunOpts{Dir: repo})
 	if err != nil {
 		t.Fatalf("git rev-parse HEAD: %v", err)
 	}
@@ -326,14 +346,14 @@ func commitTestFile(t *testing.T, repo, name, contents string) string {
 func runGitForTest(t *testing.T, repo string, args ...string) {
 	t.Helper()
 	cmd := append([]string{"git"}, args...)
-	if _, err := shell.Output(cmd, shell.RunOpts{Dir: repo}); err != nil {
+	if _, err := (shell.Default{}).Output(cmd, shell.RunOpts{Dir: repo}); err != nil {
 		t.Fatalf("%v: %v", cmd, err)
 	}
 }
 
 func writeOperationMarker(t *testing.T, repo, marker string, directory bool) {
 	t.Helper()
-	path, err := shell.Output(
+	path, err := (shell.Default{}).Output(
 		[]string{"git", "rev-parse", "--git-path", marker},
 		shell.RunOpts{Dir: repo},
 	)

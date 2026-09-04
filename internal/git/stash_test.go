@@ -129,7 +129,7 @@ func TestStashRestoreMissingEntryDoesNotChangeUserStashes(t *testing.T) {
 
 func stashOIDsForTest(t *testing.T, repo string) []string {
 	t.Helper()
-	out, err := shell.Output([]string{"git", "stash", "list", "--format=%H"}, shell.RunOpts{Dir: repo})
+	out, err := (shell.Default{}).Output([]string{"git", "stash", "list", "--format=%H"}, shell.RunOpts{Dir: repo})
 	if err != nil {
 		t.Fatalf("list stashes: %v", err)
 	}

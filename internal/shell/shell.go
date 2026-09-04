@@ -41,11 +41,6 @@ var _ Runner = Default{}
 // false. If opts.Quiet is true, stdout and stderr are captured to bytes.Buffer
 // unless the caller provides explicit buffers. If opts.Quiet is false, the
 // command inherits the process stdout/stderr.
-func Run(args []string, opts RunOpts) ([]byte, []byte, error) {
-	return Default{}.Run(args, opts)
-}
-
-// Run executes a command given as a slice of string arguments.
 func (Default) Run(args []string, opts RunOpts) ([]byte, []byte, error) {
 	if len(args) == 0 {
 		return nil, nil, fmt.Errorf("shell.Run: empty command")
@@ -119,12 +114,6 @@ func ExitCode(err error) (int, bool) {
 		return 0, false
 	}
 	return exitErr.ExitCode(), true
-}
-
-// Output executes a command and returns its stdout as a UTF-8 string with
-// trailing whitespace stripped (rtrim). It always enables Quiet and Check.
-func Output(args []string, opts RunOpts) (string, error) {
-	return Default{}.Output(args, opts)
 }
 
 // Output executes a command and returns its stdout as a UTF-8 string with

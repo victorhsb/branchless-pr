@@ -8,7 +8,7 @@ import (
 )
 
 func TestRunQuietFalseCapturesNothing(t *testing.T) {
-	_, _, err := Run([]string{"sh", "-c", "echo hi"}, RunOpts{Quiet: false, Check: true})
+	_, _, err := (Default{}).Run([]string{"sh", "-c", "echo hi"}, RunOpts{Quiet: false, Check: true})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -16,7 +16,7 @@ func TestRunQuietFalseCapturesNothing(t *testing.T) {
 
 func TestRunQuietTrueCapturesStdout(t *testing.T) {
 	var out bytes.Buffer
-	_, _, err := Run([]string{"sh", "-c", "echo hello"}, RunOpts{Quiet: true, Check: true, Stdout: &out})
+	_, _, err := (Default{}).Run([]string{"sh", "-c", "echo hello"}, RunOpts{Quiet: true, Check: true, Stdout: &out})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestRunQuietTrueCapturesStdout(t *testing.T) {
 }
 
 func TestRunQuietTrueCapturesStderrOnFailure(t *testing.T) {
-	_, errBuf, err := Run([]string{"sh", "-c", "echo boom >&2; exit 7"}, RunOpts{Quiet: true, Check: true})
+	_, errBuf, err := (Default{}).Run([]string{"sh", "-c", "echo boom >&2; exit 7"}, RunOpts{Quiet: true, Check: true})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
@@ -39,7 +39,7 @@ func TestRunQuietTrueCapturesStderrOnFailure(t *testing.T) {
 }
 
 func TestRunCheckFalseReturnsNoError(t *testing.T) {
-	_, _, err := Run([]string{"sh", "-c", "exit 3"}, RunOpts{Quiet: true, Check: false})
+	_, _, err := (Default{}).Run([]string{"sh", "-c", "exit 3"}, RunOpts{Quiet: true, Check: false})
 	if err == nil {
 		t.Fatalf("expected raw exec.ExitError to be returned")
 	}
@@ -49,7 +49,7 @@ func TestRunCheckFalseReturnsNoError(t *testing.T) {
 }
 
 func TestOutputStripsTrailingWhitespace(t *testing.T) {
-	got, err := Output([]string{"sh", "-c", "printf 'hello\\n\\n'"}, RunOpts{})
+	got, err := (Default{}).Output([]string{"sh", "-c", "printf 'hello\\n\\n'"}, RunOpts{})
 	if err != nil {
 		t.Fatalf("unexpected: %v", err)
 	}

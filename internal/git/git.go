@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
@@ -52,6 +53,9 @@ func IsFullSHA(s string) bool {
 
 // BranchExists reports whether a local branch exists.
 func (r *Repo) BranchExists(branch string) (bool, error) {
+	if err := ValidateRefName("branch name", branch); err != nil {
+		return false, &Error{Op: "branch_exists", Err: err}
+	}
 	args := []string{"git", "show-ref", "-q", "refs/heads/" + branch}
 	opts := r.opts(shell.RunOpts{Quiet: true, Check: false})
 	_, _, err := r.runner().Run(args, opts)
@@ -138,6 +142,12 @@ func (r *Repo) operationPathExists(marker string) bool {
 
 // MergeBase returns the common ancestor of a and b.
 func (r *Repo) MergeBase(a, b string) (string, error) {
+	if err := ValidateRevisionArg("first revision", a); err != nil {
+		return "", &Error{Op: "merge_base", Err: err}
+	}
+	if err := ValidateRevisionArg("second revision", b); err != nil {
+		return "", &Error{Op: "merge_base", Err: err}
+	}
 	out, err := r.runner().Output(
 		[]string{"git", "merge-base", a, b},
 		r.opts(shell.RunOpts{}),
@@ -150,18 +160,20 @@ func (r *Repo) MergeBase(a, b string) (string, error) {
 
 // RevListHeaders returns NUL-delimited commit headers for base..head.
 func (r *Repo) RevListHeaders(base, head string) (string, error) {
-	return r.runner().Output(
+	if err := ValidateRevisionArg("base revision", base); err != nil {
+		return "", &Error{Op: "rev_list_headers", Err: err}
+	}
+	if err := ValidateRevisionArg("head revision", head); err != nil {
+		return "", &Error{Op: "rev_list_headers", Err: err}
+	}
+	out, err := r.runner().Output(
 		[]string{"git", "rev-list", "--header", "^" + base, head},
 		r.opts(shell.RunOpts{}),
 	)
-}
-
-// RemoteHeads returns all branch refs advertised by remote.
-func (r *Repo) RemoteHeads(remote string) (string, error) {
-	return r.runner().Output(
-		[]string{"git", "ls-remote", "--heads", remote},
-		r.opts(shell.RunOpts{}),
-	)
+	if err != nil {
+		return "", &Error{Op: "rev_list_headers", Err: err}
+	}
+	return out, nil
 }
 
 // BranchlessStackHead returns the top commit in the current git-branchless
@@ -193,6 +205,12 @@ func (r *Repo) BranchlessStackHead() (string, bool) {
 
 // IsAncestor reports whether a is an ancestor of b.
 func (r *Repo) IsAncestor(a, b string) (bool, error) {
+	if err := ValidateRevisionArg("ancestor revision", a); err != nil {
+		return false, &Error{Op: "is_ancestor", Err: err}
+	}
+	if err := ValidateRevisionArg("descendant revision", b); err != nil {
+		return false, &Error{Op: "is_ancestor", Err: err}
+	}
 	_, _, err := r.runner().Run(
 		[]string{"git", "merge-base", "--is-ancestor", a, b},
 		r.opts(shell.RunOpts{Quiet: true, Check: false}),
@@ -223,6 +241,12 @@ func (r *Repo) Fetch(remote string) error {
 
 // Checkout creates or resets branch from startPoint.
 func (r *Repo) Checkout(startPoint, branch string) error {
+	if err := ValidateRevisionArg("start point", startPoint); err != nil {
+		return &Error{Op: "checkout", Err: err}
+	}
+	if err := ValidateRefName("branch name", branch); err != nil {
+		return &Error{Op: "checkout", Err: err}
+	}
 	_, _, err := r.runner().Run(
 		[]string{"git", "checkout", startPoint, "-B", branch},
 		r.opts(shell.RunOpts{}),
@@ -235,6 +259,12 @@ func (r *Repo) Checkout(startPoint, branch string) error {
 
 // ForceUpdateBranch creates or resets branch from startPoint without switching the worktree.
 func (r *Repo) ForceUpdateBranch(branch, startPoint string) error {
+	if err := ValidateRefName("branch name", branch); err != nil {
+		return &Error{Op: "force_update_branch", Err: err}
+	}
+	if err := ValidateRevisionArg("start point", startPoint); err != nil {
+		return &Error{Op: "force_update_branch", Err: err}
+	}
 	current, currentErr := r.CurrentBranchName()
 	if currentErr == nil && current == branch {
 		currentSHA, err := r.RevParse("HEAD")
@@ -270,6 +300,9 @@ func (r *Repo) ForceUpdateBranch(branch, startPoint string) error {
 
 // CheckoutBranch switches to branch without -B (used for post-op restore).
 func (r *Repo) CheckoutBranch(branch string) error {
+	if err := ValidateRefName("branch name", branch); err != nil {
+		return &Error{Op: "checkout_branch", Err: err}
+	}
 	_, _, err := r.runner().Run(
 		[]string{"git", "checkout", branch},
 		r.opts(shell.RunOpts{}),
@@ -302,7 +335,6 @@ func (r *Repo) ResolveRemoteRefs(remote string, refs ...string) (map[string]stri
 	if err := validateRemoteAndRefs("resolve_remote_refs", remote, refs); err != nil {
 		return nil, err
 	}
-	result := make(map[string]string, len(refs))
 	args := []string{"git", "ls-remote", "--heads", "--", remote}
 	for _, r := range refs {
 		args = append(args, "refs/heads/"+r)
@@ -311,6 +343,32 @@ func (r *Repo) ResolveRemoteRefs(remote string, refs ...string) (map[string]stri
 	if err != nil {
 		return nil, &Error{Op: "resolve_remote_refs", Err: err}
 	}
+	return parseRemoteBranchRefs(out), nil
+}
+
+// RemoteBranches returns all branch names advertised by remote.
+func (r *Repo) RemoteBranches(remote string) ([]string, error) {
+	if err := ValidateRemoteName(remote); err != nil {
+		return nil, &Error{Op: "remote_branches", Err: err}
+	}
+	out, err := r.runner().Output(
+		[]string{"git", "ls-remote", "--heads", "--", remote},
+		r.opts(shell.RunOpts{Quiet: true}),
+	)
+	if err != nil {
+		return nil, &Error{Op: "remote_branches", Err: err}
+	}
+	refs := parseRemoteBranchRefs(out)
+	branches := make([]string, 0, len(refs))
+	for branch := range refs {
+		branches = append(branches, branch)
+	}
+	sort.Strings(branches)
+	return branches, nil
+}
+
+func parseRemoteBranchRefs(out string) map[string]string {
+	result := make(map[string]string)
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
 		if len(fields) != 2 {
@@ -321,7 +379,7 @@ func (r *Repo) ResolveRemoteRefs(remote string, refs ...string) (map[string]stri
 			result[strings.TrimPrefix(fields[1], prefix)] = fields[0]
 		}
 	}
-	return result, nil
+	return result
 }
 
 // ForcePushWithLease force-pushes with atomic force-with-lease expectations.
@@ -377,6 +435,14 @@ func (r *Repo) DeleteLocalBranches(branches ...string) {
 // Rebase runs git rebase with optional extra args between onto/upstream.
 // If branch is empty it rebases the current branch.
 func (r *Repo) Rebase(onto, branch string, extras ...string) error {
+	if err := ValidateRevisionArg("upstream revision", onto); err != nil {
+		return &Error{Op: "rebase", Err: err}
+	}
+	if branch != "" {
+		if err := ValidateRefName("branch name", branch); err != nil {
+			return &Error{Op: "rebase", Err: err}
+		}
+	}
 	args := []string{"git", "rebase"}
 	args = append(args, extras...)
 	args = append(args, onto)
@@ -510,6 +576,9 @@ func (r *Repo) stashSelector(ref StashRef) (string, error) {
 
 // RevParse resolves a ref to its full 40-char SHA.
 func (r *Repo) RevParse(ref string) (string, error) {
+	if err := ValidateRevisionArg("revision", ref); err != nil {
+		return "", &Error{Op: "rev_parse", Err: err}
+	}
 	out, err := r.runner().Output(
 		[]string{"git", "rev-parse", "--verify", ref},
 		r.opts(shell.RunOpts{}),

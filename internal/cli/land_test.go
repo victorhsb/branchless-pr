@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -11,7 +8,6 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/invocation"
 	"github.com/victorhsb/branchless-pr/internal/pr"
-	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
@@ -58,14 +54,12 @@ func TestLandCmdRegistersWholeStackFlag(t *testing.T) {
 	}
 }
 
-// installFakeShellForLand sets up a fake gh script and an in-memory Git runner.
+// installFakeShellForLand sets up process-free Git and GitHub runners.
 // rebaseMergeAllowed controls the GraphQL response.
 // mergeQueueEnabled controls the rules API response (true -> returns a
 // merge_queue rule, false -> returns empty array).
-func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, _ bool, mergeQueueEnabled bool) (string, *shelltest.Fake) {
+func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, mergeQueueEnabled bool) (*shelltest.Fake, *shelltest.Fake) {
 	t.Helper()
-	binDir := t.TempDir()
-	ghLog := filepath.Join(binDir, "gh.log")
 
 	allowed := "false"
 	if rebaseMergeAllowed {
@@ -75,21 +69,24 @@ func installFakeShellForLand(t *testing.T, rebaseMergeAllowed, _ bool, mergeQueu
 	if mergeQueueEnabled {
 		mqRules = `[{"type":"merge_queue","parameters":{"merge_method":"rebase_or_merge"}}]`
 	}
-	ghScript := `#!/bin/sh
-printf '%s\n' "$*" >> "$GH_LOG"
-if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
-  printf '{"data":{"repository":{"rebaseMergeAllowed":` + allowed + `}}}\n'
-  exit 0
-fi
-if [ "$1" = "api" ] && [ "$2" = "repos/acme/widget/rules/branches/main" ]; then
-  printf '` + mqRules + `\n'
-  exit 0
-fi
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
+
+	ghResponses := []shelltest.Response{{
+		Match:  shelltest.Prefix("gh", "api", "graphql"),
+		Stdout: `{"data":{"repository":{"rebaseMergeAllowed":` + allowed + `}}}`,
+	}}
+	if rebaseMergeAllowed {
+		ghResponses = append(ghResponses, shelltest.Response{
+			Match:  shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+			Stdout: mqRules,
+		})
 	}
+	if rebaseMergeAllowed && mergeQueueEnabled {
+		ghResponses = append(ghResponses,
+			shelltest.Response{Match: shelltest.Prefix("gh", "pr", "edit")},
+			shelltest.Response{Match: shelltest.Prefix("gh", "pr", "merge")},
+		)
+	}
+	ghRun := shelltest.New(t, ghResponses...)
 
 	responses := []shelltest.Response{{
 		Match:  shelltest.Exact("git", "remote", "get-url", "--", "origin"),
@@ -101,10 +98,8 @@ exit 0
 			shelltest.Response{Match: shelltest.Exact("git", "checkout", "feature")},
 		)
 	}
-	run := shelltest.New(t, responses...)
-	t.Setenv("GH_LOG", ghLog)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	return ghLog, run
+	gitRun := shelltest.New(t, responses...)
+	return gitRun, ghRun
 }
 
 func entryForLandTest(head, prURL string) *stack.Entry {
@@ -127,15 +122,12 @@ func shellCallsLog(run *shelltest.Fake) string {
 }
 
 func TestLandWholeStackSingleEntry(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fakes are Unix-only")
-	}
-	ghLog, run := installFakeShellForLand(t, true, false, true)
+	gitRun, ghRun := installFakeShellForLand(t, true, true)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
-		Git:        git.New("", run),
-		PR:         pr.NewClient(shell.Default{}),
+		Git:        git.New("", gitRun),
+		PR:         pr.NewClient(ghRun),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -151,13 +143,13 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 		t.Fatalf("expected queued message in output, got:\n%s", out)
 	}
 
-	gh := readTestFile(t, ghLog)
+	gh := shellCallsLog(ghRun)
 	mustContain(t, gh, "api graphql")
 	mustContain(t, gh, "api repos/acme/widget/rules/branches/main")
 	mustContain(t, gh, "pr edit https://github.com/acme/widget/pull/1 -B main")
 	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/1 --rebase --auto")
 
-	gitLog := shellCallsLog(run)
+	gitLog := shellCallsLog(gitRun)
 	mustContain(t, gitLog, "remote get-url -- origin")
 	mustContain(t, gitLog, "fetch --prune -- origin")
 	mustContain(t, gitLog, "checkout feature")
@@ -171,15 +163,12 @@ func TestLandWholeStackSingleEntry(t *testing.T) {
 }
 
 func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fakes are Unix-only")
-	}
-	ghLog, run := installFakeShellForLand(t, true, true, true)
+	gitRun, ghRun := installFakeShellForLand(t, true, true)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
-		Git:        git.New("", run),
-		PR:         pr.NewClient(shell.Default{}),
+		Git:        git.New("", gitRun),
+		PR:         pr.NewClient(ghRun),
 		OrigBranch: "feature",
 	}
 	bottom := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -193,7 +182,7 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 		}
 	})
 
-	gh := readTestFile(t, ghLog)
+	gh := shellCallsLog(ghRun)
 	// Only the tip PR is edited and queued for merge.
 	mustContain(t, gh, "pr edit https://github.com/acme/widget/pull/3 -B main")
 	mustContain(t, gh, "pr merge https://github.com/acme/widget/pull/3 --rebase --auto")
@@ -205,7 +194,7 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 		t.Fatalf("whole-stack should not invoke --squash:\n%s", gh)
 	}
 
-	gitLog := shellCallsLog(run)
+	gitLog := shellCallsLog(gitRun)
 	// Queued mode does NOT delete local branches or rebase.
 	if strings.Contains(gitLog, "branch -D") {
 		t.Fatalf("did not expect branch deletion in queued mode, git log:\n%s", gitLog)
@@ -220,15 +209,12 @@ func TestLandWholeStackMultiEntryRetargetsTip(t *testing.T) {
 }
 
 func TestLandWholeStackRejectedWhenRebaseDisallowed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fakes are Unix-only")
-	}
-	ghLog, run := installFakeShellForLand(t, false, false, false)
+	gitRun, ghRun := installFakeShellForLand(t, false, false)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
-		Git:        git.New("", run),
-		PR:         pr.NewClient(shell.Default{}),
+		Git:        git.New("", gitRun),
+		PR:         pr.NewClient(ghRun),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -243,26 +229,23 @@ func TestLandWholeStackRejectedWhenRebaseDisallowed(t *testing.T) {
 	}
 
 	// No mutating gh/git calls should have happened.
-	gh := readTestFile(t, ghLog)
+	gh := shellCallsLog(ghRun)
 	if strings.Contains(gh, "pr edit") || strings.Contains(gh, "pr merge") {
 		t.Fatalf("expected no PR edits/merges when rebase disallowed, gh log:\n%s", gh)
 	}
-	gitLog := shellCallsLog(run)
+	gitLog := shellCallsLog(gitRun)
 	if strings.Contains(gitLog, "fetch") || strings.Contains(gitLog, "checkout") {
 		t.Fatalf("expected no fetch/checkout when rebase disallowed, git log:\n%s", gitLog)
 	}
 }
 
 func TestLandWholeStackRejectedWhenMergeQueueDisabled(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fakes are Unix-only")
-	}
-	ghLog, run := installFakeShellForLand(t, true, false, false)
+	gitRun, ghRun := installFakeShellForLand(t, true, false)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
-		Git:        git.New("", run),
-		PR:         pr.NewClient(shell.Default{}),
+		Git:        git.New("", gitRun),
+		PR:         pr.NewClient(ghRun),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")
@@ -277,57 +260,46 @@ func TestLandWholeStackRejectedWhenMergeQueueDisabled(t *testing.T) {
 	}
 
 	// No mutating gh/git calls should have happened after the rules check.
-	gh := readTestFile(t, ghLog)
+	gh := shellCallsLog(ghRun)
 	if strings.Contains(gh, "pr edit") || strings.Contains(gh, "pr merge") {
 		t.Fatalf("expected no PR edits/merges when merge queue disabled, gh log:\n%s", gh)
 	}
-	gitLog := shellCallsLog(run)
+	gitLog := shellCallsLog(gitRun)
 	if strings.Contains(gitLog, "fetch") || strings.Contains(gitLog, "checkout") {
 		t.Fatalf("expected no fetch/checkout when merge queue disabled, git log:\n%s", gitLog)
 	}
 }
 
 func TestLandWholeStackUnknownMergeQueueProceedsAndNormalizes(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fakes are Unix-only")
-	}
-	binDir := t.TempDir()
-	ghLog := filepath.Join(binDir, "gh.log")
-
-	ghScript := `#!/bin/sh
-printf '%s\n' "$*" >> "$GH_LOG"
-if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
-  printf '{"data":{"repository":{"rebaseMergeAllowed":true}}}\n'
-  exit 0
-fi
-if [ "$1" = "api" ] && [ "$2" = "repos/acme/widget/rules/branches/main" ]; then
-  printf '{"message":"Not Found"}\n'
-  exit 1
-fi
-if [ "$1" = "pr" ] && [ "$2" = "merge" ]; then
-  printf 'merge queue is not enabled for this branch\n' >&2
-  exit 1
-fi
-exit 0
-`
-	if err := os.WriteFile(filepath.Join(binDir, "gh"), []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-
-	run := shelltest.New(t,
+	gitRun := shelltest.New(t,
 		shelltest.Response{
 			Match:  shelltest.Exact("git", "remote", "get-url", "--", "origin"),
 			Stdout: "https://github.com/acme/widget.git\n",
 		},
 		shelltest.Response{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
 	)
-	t.Setenv("GH_LOG", ghLog)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ghRun := shelltest.New(t,
+		shelltest.Response{
+			Match:  shelltest.Prefix("gh", "api", "graphql"),
+			Stdout: `{"data":{"repository":{"rebaseMergeAllowed":true}}}`,
+		},
+		shelltest.Response{
+			Match:    shelltest.Exact("gh", "api", "repos/acme/widget/rules/branches/main"),
+			Stdout:   `{"message":"Not Found"}`,
+			ExitCode: 1,
+		},
+		shelltest.Response{Match: shelltest.Prefix("gh", "pr", "edit")},
+		shelltest.Response{
+			Match:    shelltest.Prefix("gh", "pr", "merge"),
+			Stderr:   "merge queue is not enabled for this branch\n",
+			ExitCode: 1,
+		},
+	)
 
 	app := &invocation.AppContext{
 		Args:       invocation.CommonArgs{Remote: "origin", Target: "main"},
-		Git:        git.New("", run),
-		PR:         pr.NewClient(shell.Default{}),
+		Git:        git.New("", gitRun),
+		PR:         pr.NewClient(ghRun),
 		OrigBranch: "feature",
 	}
 	tip := entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")

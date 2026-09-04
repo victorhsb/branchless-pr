@@ -197,28 +197,29 @@ func setupStashLifecycleRepo(t *testing.T) (repo, realGit string) {
 
 func installStashLifecycleCommands(t *testing.T, forceDirtyStatus, failStashRestore bool) shell.Runner {
 	t.Helper()
-	bin := t.TempDir()
-	ghScript := "#!/bin/sh\n" +
-		"if [ \"$1\" = api ]; then\n" +
-		"  printf '{\"data\":{\"viewer\":{\"login\":\"stash-test-user\"}}}\\n'\n" +
-		"fi\n" +
-		"exit 0\n"
-	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(ghScript), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return stashLifecycleRunner{
 		forceDirtyStatus: forceDirtyStatus,
 		failStashRestore: failStashRestore,
+		gh: shelltest.New(t,
+			shelltest.Response{Match: shelltest.Exact("gh")},
+			shelltest.Response{
+				Match:  shelltest.Exact("gh", "api", "graphql", "-f", "query=query{viewer{login}}"),
+				Stdout: `{"data":{"viewer":{"login":"stash-test-user"}}}`,
+			},
+		),
 	}
 }
 
 type stashLifecycleRunner struct {
 	forceDirtyStatus bool
 	failStashRestore bool
+	gh               shell.Runner
 }
 
 func (r stashLifecycleRunner) Output(args []string, opts shell.RunOpts) (string, error) {
+	if len(args) > 0 && args[0] == "gh" {
+		return r.gh.Output(args, opts)
+	}
 	if r.forceDirtyStatus && equalArgs(args, "git", "status", "--porcelain") {
 		return " M tracked.txt", nil
 	}
@@ -226,6 +227,9 @@ func (r stashLifecycleRunner) Output(args []string, opts shell.RunOpts) (string,
 }
 
 func (r stashLifecycleRunner) Run(args []string, opts shell.RunOpts) ([]byte, []byte, error) {
+	if len(args) > 0 && args[0] == "gh" {
+		return r.gh.Run(args, opts)
+	}
 	if r.failStashRestore && len(args) >= 3 && args[0] == "git" && args[1] == "stash" && args[2] == "apply" {
 		return nil, []byte("forced stash apply failure\n"), &shelltest.ExitError{Code: 42}
 	}
@@ -271,14 +275,14 @@ func assertOriginalWorkingTreeRestored(t *testing.T, realGit, repo string) {
 
 func runGitForStashTest(t *testing.T, gitPath, repo string, args ...string) {
 	t.Helper()
-	if _, err := shell.Output(append([]string{gitPath}, args...), shell.RunOpts{Dir: repo}); err != nil {
+	if _, err := (shell.Default{}).Output(append([]string{gitPath}, args...), shell.RunOpts{Dir: repo}); err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
 }
 
 func gitOutputForStashTest(t *testing.T, gitPath, repo string, args ...string) string {
 	t.Helper()
-	out, err := shell.Output(append([]string{gitPath}, args...), shell.RunOpts{Dir: repo})
+	out, err := (shell.Default{}).Output(append([]string{gitPath}, args...), shell.RunOpts{Dir: repo})
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}

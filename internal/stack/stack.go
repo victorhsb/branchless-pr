@@ -60,10 +60,11 @@ func (st Stack) Reverse() Stack {
 // AssignHeads assigns generated branch names to entries missing metadata heads.
 // Existing metadata takes precedence.
 func (st Stack) AssignHeads(repo *git.Repo, tmpl BranchTemplate, username, branchName string, remote string) error {
-	nextID, err := NextID(repo, remote, tmpl, username, branchName)
+	remoteBranches, err := repo.RemoteBranches(remote)
 	if err != nil {
 		return fmt.Errorf("next branch id: %w", err)
 	}
+	nextID := NextID(remoteBranches, tmpl, username, branchName)
 	for _, e := range st {
 		if !e.HasHead() {
 			e.SetHead(tmpl.Generate(username, branchName, nextID))

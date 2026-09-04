@@ -444,11 +444,11 @@ Expected output is files under `internal/git`, `internal/pr`,
       convert git-side `PATH` fakes + hybrid stash fault-injection cases to
       `shelltest.Fake`; remove Git-only Windows skips (the remaining skips use
       `gh` scripts and leave in commit 3); argv byte-identical
-- [ ] Commit 3 — `pr.Client` single GitHub boundary: absorb `CheckGHInstalled`/
+- [x] Commit 3 — `pr.Client` single GitHub boundary: absorb `CheckGHInstalled`/
       `GetGHUsername` (delete `git/config.go` + username override) and
       `nativestacks` transport; migrate `stack/verify.go` and the four
       `NewAPIClient` sites; convert remaining `PATH` fakes
-- [ ] Commit 4 — `Repo.RevListHeaders`, `Repo.RemoteBranches`; pure
+- [x] Commit 4 — `Repo.RevListHeaders`, `Repo.RemoteBranches`; pure
       `stack.NextID(remoteBranches)`; `stack.Discover(repo, ...)` + all callers
       incl. `stackstate`; **safety change** flagged in commit message
       (`--`/validation on `NextID` and local wrappers, revision-arg validator

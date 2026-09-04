@@ -75,6 +75,31 @@ func TestValidateRefNameRejectsInjection(t *testing.T) {
 	}
 }
 
+func TestValidateRevisionArgRejectsInjection(t *testing.T) {
+	cases := []struct {
+		name     string
+		revision string
+		ok       bool
+	}{
+		{"branch", "main", true},
+		{"head", "HEAD", true},
+		{"full sha", "0123456789abcdef0123456789abcdef01234567", true},
+		{"revision expression", "refs/stash^{commit}", true},
+		{"leading dash", "--exec=touch /tmp/pwned", false},
+		{"empty", "", false},
+		{"space", "HEAD other", false},
+		{"control char", "HEAD\x00", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRevisionArg("revision", tc.revision)
+			if tc.ok != (err == nil) {
+				t.Fatalf("ValidateRevisionArg(%q) = %v, ok=%v", tc.revision, err, tc.ok)
+			}
+		})
+	}
+}
+
 // The remote wrappers must reject a hostile value before it ever reaches a git
 // argument vector, regardless of the `--` terminators they also pass.
 func TestRemoteWrappersRejectHostileRemote(t *testing.T) {
@@ -89,6 +114,9 @@ func TestRemoteWrappersRejectHostileRemote(t *testing.T) {
 	}
 	if _, err := repo.ResolveRemoteRefs(hostile, "foo"); err == nil {
 		t.Error("ResolveRemoteRefs accepted a hostile remote")
+	}
+	if _, err := repo.RemoteBranches(hostile); err == nil {
+		t.Error("RemoteBranches accepted a hostile remote")
 	}
 	if err := repo.ForcePushWithLease(hostile, nil, "foo"); err == nil {
 		t.Error("ForcePushWithLease accepted a hostile remote")
@@ -119,5 +147,124 @@ func TestRemoteWrappersRejectHostileBranchName(t *testing.T) {
 	}
 	if err := repo.ForcePushWithLease("origin", nil, hostile); err == nil {
 		t.Error("ForcePushWithLease accepted a hostile branch name")
+	}
+}
+
+func TestLocalWrappersRejectHostileArgumentsBeforeRunningGit(t *testing.T) {
+	const hostile = "--exec=touch /tmp/pwned"
+	tests := []struct {
+		name string
+		call func(*Repo) error
+	}{
+		{
+			name: "BranchExists branch",
+			call: func(repo *Repo) error {
+				_, err := repo.BranchExists(hostile)
+				return err
+			},
+		},
+		{
+			name: "Checkout start point",
+			call: func(repo *Repo) error {
+				return repo.Checkout(hostile, "safe")
+			},
+		},
+		{
+			name: "Checkout branch",
+			call: func(repo *Repo) error {
+				return repo.Checkout("HEAD", hostile)
+			},
+		},
+		{
+			name: "CheckoutBranch branch",
+			call: func(repo *Repo) error {
+				return repo.CheckoutBranch(hostile)
+			},
+		},
+		{
+			name: "ForceUpdateBranch branch",
+			call: func(repo *Repo) error {
+				return repo.ForceUpdateBranch(hostile, "HEAD")
+			},
+		},
+		{
+			name: "ForceUpdateBranch start point",
+			call: func(repo *Repo) error {
+				return repo.ForceUpdateBranch("safe", hostile)
+			},
+		},
+		{
+			name: "Rebase upstream",
+			call: func(repo *Repo) error {
+				return repo.Rebase(hostile, "safe")
+			},
+		},
+		{
+			name: "Rebase branch",
+			call: func(repo *Repo) error {
+				return repo.Rebase("main", hostile)
+			},
+		},
+		{
+			name: "RevParse revision",
+			call: func(repo *Repo) error {
+				_, err := repo.RevParse(hostile)
+				return err
+			},
+		},
+		{
+			name: "MergeBase first revision",
+			call: func(repo *Repo) error {
+				_, err := repo.MergeBase(hostile, "HEAD")
+				return err
+			},
+		},
+		{
+			name: "MergeBase second revision",
+			call: func(repo *Repo) error {
+				_, err := repo.MergeBase("HEAD", hostile)
+				return err
+			},
+		},
+		{
+			name: "IsAncestor first revision",
+			call: func(repo *Repo) error {
+				_, err := repo.IsAncestor(hostile, "HEAD")
+				return err
+			},
+		},
+		{
+			name: "IsAncestor second revision",
+			call: func(repo *Repo) error {
+				_, err := repo.IsAncestor("HEAD", hostile)
+				return err
+			},
+		},
+		{
+			name: "RevListHeaders base revision",
+			call: func(repo *Repo) error {
+				_, err := repo.RevListHeaders(hostile, "HEAD")
+				return err
+			},
+		},
+		{
+			name: "RevListHeaders head revision",
+			call: func(repo *Repo) error {
+				_, err := repo.RevListHeaders("main", hostile)
+				return err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			run := shelltest.New(t)
+			if err := tc.call(New("", run)); err == nil {
+				t.Fatal("hostile argument was accepted")
+			}
+			if got := len(run.Calls()); got != 0 {
+				t.Fatalf("runner received %d command(s), want none", got)
+			}
+		})
 	}
 }

@@ -45,13 +45,25 @@ func ValidateRemoteName(remote string) error {
 // refspec component. It rejects the option-injection and whitespace cases; git
 // itself enforces the remaining ref syntax rules via check-ref-format.
 func ValidateRefName(kind, ref string) error {
-	if ref == "" {
+	return validatePositionalArg(kind, ref)
+}
+
+// ValidateRevisionArg reports whether revision is safe to pass to a Git
+// command as a positional revision argument. Git accepts branch names, tags,
+// full object IDs, and revision expressions in these positions; this guard
+// rejects only values that could be parsed as options or split across argv.
+func ValidateRevisionArg(kind, revision string) error {
+	return validatePositionalArg(kind, revision)
+}
+
+func validatePositionalArg(kind, value string) error {
+	if value == "" {
 		return fmt.Errorf("%s is empty", kind)
 	}
-	if strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("invalid %s %q: must not begin with '-' (git would parse it as an option)", kind, ref)
+	if strings.HasPrefix(value, "-") {
+		return fmt.Errorf("invalid %s %q: must not begin with '-' (git would parse it as an option)", kind, value)
 	}
-	return rejectControlOrSpace(kind, ref)
+	return rejectControlOrSpace(kind, value)
 }
 
 // validateRemoteAndRefs checks a remote name plus the branch names that will be

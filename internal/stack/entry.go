@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/victorhsb/branchless-pr/internal/git"
 )
 
 var (
@@ -305,31 +303,11 @@ func (bt BranchTemplate) ExtractID(branch, username, localBranch string) (int, e
 	return strconv.Atoi(rest)
 }
 
-// NextID scans remote refs for branches matching the template and returns
+// NextID scans remote branches matching the template and returns
 // the maximum existing ID plus one. If none are found, returns 1.
-func NextID(repo *git.Repo, remote string, tmpl BranchTemplate, username, localBranch string) (int, error) {
-	out, err := repo.RemoteHeads(remote)
-	if err != nil {
-		return 0, fmt.Errorf("ls-remote: %w", err)
-	}
-
+func NextID(remoteBranches []string, tmpl BranchTemplate, username, localBranch string) int {
 	maxID := 0
-	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Format: <sha>\trefs/heads/<branch>
-		parts := strings.Split(line, "\t")
-		if len(parts) != 2 {
-			continue
-		}
-		ref := parts[1]
-		const prefix = "refs/heads/"
-		if !strings.HasPrefix(ref, prefix) {
-			continue
-		}
-		branch := strings.TrimPrefix(ref, prefix)
+	for _, branch := range remoteBranches {
 		if !tmpl.Match(branch, username, localBranch) {
 			continue
 		}
@@ -338,5 +316,5 @@ func NextID(repo *git.Repo, remote string, tmpl BranchTemplate, username, localB
 			maxID = id
 		}
 	}
-	return maxID + 1, nil
+	return maxID + 1
 }

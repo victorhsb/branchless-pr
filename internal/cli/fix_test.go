@@ -1,16 +1,12 @@
 package cli
 
 import (
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/victorhsb/branchless-pr/internal/config"
 	"github.com/victorhsb/branchless-pr/internal/git"
 	"github.com/victorhsb/branchless-pr/internal/pr"
-	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
@@ -33,75 +29,10 @@ func TestFixCmdExposesFlags(t *testing.T) {
 }
 
 func TestFixDryRunReportsNoAmend(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
-	binDir := t.TempDir()
-	logPath := filepath.Join(binDir, "git.log")
-	gitPath := filepath.Join(binDir, "git")
-	gitScript := `#!/bin/sh
-printf '%s\n' "$*" >> "$GIT_LOG"
-if [ "$1" = "log" ] && [ "$2" = "-1" ]; then
-	echo "Hello world"
-fi
-if [ "$1" = "rev-parse" ] && [ "$2" = "--verify" ]; then
-	echo "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-fi
-if [ "$1" = "status" ] && [ "$2" = "--porcelain" ]; then
-	echo ""
-fi
-`
-	if err := os.WriteFile(gitPath, []byte(gitScript), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
-	t.Setenv("GIT_LOG", logPath)
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	ghPath := filepath.Join(binDir, "gh")
-	ghScript := `#!/bin/sh
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-	echo '{"url":"https://github.com/test/repo/pull/42","headRefName":"feature","baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","number":42,"state":"OPEN","body":"","title":"Test PR","mergeStateStatus":"CLEAN","isDraft":false}'
-	exit 0
-fi
-if [ "$1" = "api" ]; then
-	echo '{"data":{"viewer":{"login":"testuser"}}}'
-	exit 0
-fi
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-
 	repoDir := t.TempDir()
-	if err := runGitForTest(repoDir, "init"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.email", "test@test.com"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.name", "Test"); err != nil {
-		t.Fatal(err)
-	}
-	chdirForTest(t, repoDir)
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "add", "file.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "commit", "-m", "initial"); err != nil {
-		t.Fatal(err)
-	}
-
-	// We need origin/main to exist for stack.Discover in advisory check
-	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
-		t.Fatal(err)
-	}
 	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	gitRepo := git.New(repoDir, newFixGitRunner(t, headSHA, "Hello world", false, true))
-	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
-		t.Fatal(err)
-	}
+	fixRun := newFixGitRunner(t, headSHA, "Hello world", false, true)
+	gitRepo := git.New(repoDir, fixRun)
 
 	out := captureStdout(t, func() {
 		app := &AppContext{
@@ -131,60 +62,16 @@ fi
 		t.Fatalf("dry-run output missing 'No commit was changed', got:\n%s", out)
 	}
 
-	// Verify no amend was attempted in fake git log
-	log := readTestFile(t, logPath)
+	// Verify no amend was attempted through the injected Git boundary.
+	log := shellCallsLog(fixRun)
 	if strings.Contains(log, "commit --amend") {
 		t.Fatalf("dry-run should not amend; git log:\n%s", log)
 	}
 }
 
 func TestFixAlreadyFixedReportsNoop(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
 	repoDir := t.TempDir()
-	if err := runGitForTest(repoDir, "init"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.email", "test@test.com"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.name", "Test"); err != nil {
-		t.Fatal(err)
-	}
-	chdirForTest(t, repoDir)
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "add", "file.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "commit", "-m", "initial\n\nstack-info: PR: https://github.com/test/repo/pull/42, branch: feature"); err != nil {
-		t.Fatal(err)
-	}
-
-	binDir := t.TempDir()
-	ghPath := filepath.Join(binDir, "gh")
-	ghScript := `#!/bin/sh
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-	echo '{"url":"https://github.com/test/repo/pull/42","headRefName":"feature","baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","number":42,"state":"OPEN","body":"","title":"Test PR","mergeStateStatus":"CLEAN","isDraft":false}'
-	exit 0
-fi
-if [ "$1" = "api" ]; then
-	echo '{"data":{"viewer":{"login":"testuser"}}}'
-	exit 0
-fi
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	// Set up origin/main
-	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
-		t.Fatal(err)
-	}
-	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	gitRepo := git.New(repoDir, newFixGitRunner(
 		t,
 		headSHA,
@@ -192,10 +79,6 @@ fi
 		false,
 		true,
 	))
-	// update-ref requires a real git remote ref
-	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
-		t.Fatal(err)
-	}
 
 	out := captureStdout(t, func() {
 		app := &AppContext{
@@ -224,51 +107,8 @@ fi
 }
 
 func TestFixRefusesDifferentMetadataWithoutReplace(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh is Unix-only")
-	}
 	repoDir := t.TempDir()
-	if err := runGitForTest(repoDir, "init"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.email", "test@test.com"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.name", "Test"); err != nil {
-		t.Fatal(err)
-	}
-	chdirForTest(t, repoDir)
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "add", "file.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "commit", "-m", "initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch"); err != nil {
-		t.Fatal(err)
-	}
-
-	binDir := t.TempDir()
-	ghPath := filepath.Join(binDir, "gh")
-	ghScript := `#!/bin/sh
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-	echo '{"url":"https://github.com/test/repo/pull/42","headRefName":"feature","baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","number":42,"state":"OPEN","body":"","title":"Test PR","mergeStateStatus":"CLEAN","isDraft":false}'
-	exit 0
-fi
-if [ "$1" = "api" ]; then
-	echo '{"data":{"viewer":{"login":"testuser"}}}'
-	exit 0
-fi
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
-		t.Fatal(err)
-	}
-	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	gitRepo := git.New(repoDir, newFixGitRunner(
 		t,
 		headSHA,
@@ -276,9 +116,6 @@ fi
 		false,
 		false,
 	))
-	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
-		t.Fatal(err)
-	}
 
 	err := fixImpl(&AppContext{
 		Config: config.Defaults(),
@@ -303,51 +140,8 @@ fi
 }
 
 func TestFixReplaceOverwritesDifferentMetadata(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell script fake gh/git is Unix-only")
-	}
 	repoDir := t.TempDir()
-	if err := runGitForTest(repoDir, "init"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.email", "test@test.com"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "config", "user.name", "Test"); err != nil {
-		t.Fatal(err)
-	}
-	chdirForTest(t, repoDir)
-	if err := os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "add", "file.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := runGitForTest(repoDir, "commit", "-m", "initial\n\nstack-info: PR: https://github.com/test/repo/pull/1, branch: old-branch"); err != nil {
-		t.Fatal(err)
-	}
-
-	binDir := t.TempDir()
-	ghPath := filepath.Join(binDir, "gh")
-	ghScript := `#!/bin/sh
-if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-	echo '{"url":"https://github.com/test/repo/pull/42","headRefName":"feature","baseRefName":"main","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","number":42,"state":"OPEN","body":"","title":"Test PR","mergeStateStatus":"CLEAN","isDraft":false}'
-	exit 0
-fi
-if [ "$1" = "api" ]; then
-	echo '{"data":{"viewer":{"login":"testuser"}}}'
-	exit 0
-fi
-`
-	if err := os.WriteFile(ghPath, []byte(ghScript), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	if err := runGitForTest(repoDir, "remote", "add", "origin", "/dev/null"); err != nil {
-		t.Fatal(err)
-	}
-	headSHA, _ := git.New(repoDir, shell.Default{}).RevParse("HEAD")
+	headSHA := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	fixRun := newFixGitRunner(
 		t,
 		headSHA,
@@ -356,9 +150,6 @@ fi
 		true,
 	)
 	gitRepo := git.New(repoDir, fixRun)
-	if err := runGitForTest(repoDir, "update-ref", "refs/remotes/origin/main", headSHA); err != nil {
-		t.Fatal(err)
-	}
 
 	out := captureStdout(t, func() {
 		app := &AppContext{
