@@ -1,6 +1,6 @@
 # branchless-pr
 
-`branchless-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests. This is the Go port of the [Modular `stack-pr`](https://github.com/modular/stack-pr) Python tool. It preserves the original tool's algorithms and CLI surface.
+`branchless-pr` is a command-line tool for creating, updating, viewing, abandoning, and landing stacked GitHub pull requests. It is the Go successor to the [Modular `stack-pr`](https://github.com/modular/stack-pr) Python tool; it remains compatible with that tool's commit-message stack metadata while evolving its own behavior and CLI.
 
 A stack is the ordered list of local commits in a Git revision range (`BASE..HEAD`). Each commit corresponds to exactly one GitHub PR. The bottom PR targets the repository target branch (normally `main`); every higher PR targets the generated branch for the previous commit. This way each PR review shows only one logical commit while still preserving dependency order.
 
@@ -220,6 +220,7 @@ bpr abandon
 | `bpr checks` | Report all CI checks and brief review-attention state across the stack. |
 | `bpr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. Refuses to land stacks linked to a GitHub native Stack. |
 | `bpr abandon` | Strip stack metadata and delete generated branches. Unstacks matching GitHub native Stacks before deleting remote branches. |
+| `bpr fix --pr <number>` | Repair the local `HEAD` commit's stack metadata from an existing PR. Local-only: amends the commit message, never touches remotes or GitHub. Supports `--dry-run` and `--replace`. |
 | `bpr config init` | Scaffold a starter `.stack-pr.cfg` with sensible defaults. |
 | `bpr config set <section>.<key>=<value>` | Write a setting to `.stack-pr.cfg` (legacy: `config <section>.<key>=<value>`). |
 | `bpr agent prompt [topic]` | Emit static, versioned guidance for LLM agents. |
@@ -250,6 +251,15 @@ bpr abandon
 | `--dry-run`       | Preview submit/export actions without applying local Git or GitHub changes. |
 | `--receipt`       | Emit a JSON operation receipt to a file, `-`, or `off`.                      |
 
+### Operation receipts
+
+`bpr submit --receipt <path>` records a machine-readable JSON receipt of the
+execution: repo and stack context plus every operation (PR creates/updates,
+pushes, native Stack calls) with an `ok` or `failed` status and, on failure,
+the error. The top-level `status` is `ok`, `failed`, or `partial_failure`. Use
+`--receipt -` to write the receipt to stdout or `--receipt off` to suppress
+it. Receipts are only available for real executions, not `--dry-run`.
+
 ## Previewing with `--dry-run`
 
 `bpr submit --dry-run` (and its alias `bpr export --dry-run`) prints
@@ -257,7 +267,9 @@ the plan that a real submit would execute — per stack entry: the action
 (create or update PR), commit title, generated head branch, computed base
 branch, existing PR URL when present, draft state for new PRs, and whether
 stack metadata would be added to the commit. No local Git mutations, remote
-pushes, or GitHub PR writes are performed.
+pushes, or GitHub PR writes are performed. `bpr fix --dry-run` reports the
+planned metadata repair the same way. `land` and `abandon` do not support
+`--dry-run`.
 
 ## GitHub native Stacked PRs (private preview)
 
@@ -339,7 +351,7 @@ bpr checks --commit abc123
 
 `bpr agent prompt [topic]` prints deterministic guidance for LLM agents.
 It is side-effect-free and runs without a git repository or authenticated `gh`.
-Supported topics are `overview`, `view`, `submit`, `land`, `abandon`,
+Supported topics are `overview`, `view`, `submit`, `land`, `abandon`, `fix`,
 `recovery`, and `all` (the default).
 
 ```bash

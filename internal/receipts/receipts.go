@@ -1,5 +1,5 @@
 // Package receipts provides an opt-in machine-readable receipt for
-// submit/export executions (SPEC: submit-export, "Operation receipts").
+// submit/export executions.
 package receipts
 
 import (

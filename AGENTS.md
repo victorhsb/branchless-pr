@@ -52,6 +52,10 @@ apply the `canon-record-gate` skill and establish its verdict. Use the `canon`
 skill to manage records that pass the gate. A coding preference, local refactor,
 or completed task does not by itself warrant an ADR.
 
+**Canon scope:** this repository uses `canon` for ADRs only. There are no
+`docs/spec/` or `docs/domain/` directories by design; do not run
+`canon spec init` or `canon domain init` here.
+
 ## Autonomy and scope
 
 - Choose and explain the best option when it is reasonable, serves the requested

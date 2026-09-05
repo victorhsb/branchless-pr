@@ -2,7 +2,7 @@ package stack
 
 import "fmt"
 
-// ANSI colour / style codes (SPEC §19).
+// ANSI colour / style codes.
 const (
 	Magenta = "\033[95m"
 	Blue    = "\033[94m"

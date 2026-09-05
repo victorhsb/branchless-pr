@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in `stack-pr`!
+Thanks for your interest in `bpr`!
 
 ## Filing issues
 
@@ -10,16 +10,17 @@ Thanks for your interest in `stack-pr`!
 ## Pull requests
 
 - Fork the repo and open your PR against `main`.
-- Run `go vet ./...`, `gofmt -l .`, and `go test ./...` before pushing.
+- Run `make test`, `make vet`, and `make fmt-check` before pushing.
 - Keep changes focused — one feature or fix per PR.
-- Follow the algorithms in `docs/specs/`; if behavior should change, update the
-  relevant spec in the same PR.
+- Add a regression test for each bug fix.
+- Current Go behavior, tests, and maintained documentation are the authority.
+  There is no spec or plan phase; consult `docs/adr/` before changing an
+  architectural boundary.
 
 ## Style
 
 - Standard `gofmt`.
 - Errors propagate via explicit returns; do not use panics for control flow.
-- Shell wrappers live in `internal/shell`; never call `exec.Command` outside it
-  unless there is a clear reason.
+- Shell wrappers live in `internal/shell`; never call `exec.Command` outside it.
 
 Maintainers control merges. Reviews aim for a one-business-day turnaround.

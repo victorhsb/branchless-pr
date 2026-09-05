@@ -25,4 +25,4 @@ Operation-state paths are resolved by asking Git for the repository context (for
 
 ## Consequences
 
-Rebase, merge, cherry-pick, and sequencer state is detected correctly from repository subdirectories, linked worktrees, submodules, and repositories with a separate Git directory. The behavioral detection contract lives in `docs/specs/git-operation-safety.md`; this ADR records why the port diverges from the Python reference. Mutating commands must not reintroduce literal `.git` path checks.
+Rebase, merge, cherry-pick, and sequencer state is detected correctly from repository subdirectories, linked worktrees, submodules, and repositories with a separate Git directory. The behavioral detection contract is enforced by `internal/git` and its tests; this ADR records why the port diverges from the Python reference. Mutating commands must not reintroduce literal `.git` path checks.

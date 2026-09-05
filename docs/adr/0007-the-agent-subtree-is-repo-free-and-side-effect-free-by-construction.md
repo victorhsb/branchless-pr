@@ -25,4 +25,4 @@ The agent command subtree short-circuits PersistentPreRunE: no repo discovery, n
 
 ## Consequences
 
-Agent commands are safe to run unconditionally in any directory, but the pre-run pipeline is bypassed rather than shared: changes to PersistentPreRunE must explicitly consider whether they apply to the agent path. Because diagnose reports failures in-band instead of via exit codes, consumers must parse the JSON envelope rather than rely on process status. Behavioral contracts live in docs/specs/agent-prompt-command.md and docs/specs/agent-diagnose.md.
+Agent commands are safe to run unconditionally in any directory, but the pre-run pipeline is bypassed rather than shared: changes to PersistentPreRunE must explicitly consider whether they apply to the agent path. Because diagnose reports failures in-band instead of via exit codes, consumers must parse the JSON envelope rather than rely on process status. Behavioral contracts are pinned by the agent prompt golden tests and the diagnose tests.

@@ -128,7 +128,7 @@ func newRootCommand(progName string, args []string, runner shell.Runner) (*cobra
 	root.AddCommand(commentsCmd())
 	root.AddCommand(checksCmd())
 
-	// Land is only registered when land.style != disable (SPEC §6.2)
+	// Land is only registered when land.style != disable
 	landStyle := cfg.Get("land", "style")
 	if landStyle != "disable" {
 		root.AddCommand(landCmd())

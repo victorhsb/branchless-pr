@@ -25,7 +25,7 @@ The branch name template must always yield an $ID component. A template that omi
 
 ## Consequences
 
-Collisions are prevented by construction rather than by pre-run validation errors. The empty template is the only invalid case, and it is reported by `agent diagnose` rather than enforced at pre-run. Template variables are documented in the config spec.
+Collisions are prevented by construction rather than by pre-run validation errors. The empty template is the only invalid case, and it is reported by `agent diagnose` rather than enforced at pre-run. Template variables are documented in the README configuration section and the generated config template.
 
 ## Appendix: 2026-08-08 correction
 

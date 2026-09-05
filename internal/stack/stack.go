@@ -74,7 +74,9 @@ func (st Stack) AssignHeads(repo *git.Repo, tmpl BranchTemplate, username, branc
 	return nil
 }
 
-// AssignBases sets base branches bottom-to-top per SPEC §5.5.
+// AssignBases sets base branches bottom-to-top: the bottom entry targets the
+// repository target branch, each higher entry targets the generated branch of
+// the entry below it.
 func (st Stack) AssignBases(target string) {
 	for i, e := range st {
 		if i == 0 {

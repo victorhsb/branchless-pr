@@ -25,4 +25,4 @@ Each commit in a submitted stack carries a 'stack-info: PR: <url>, branch: <head
 
 ## Consequences
 
-Amending metadata rewrites commit hashes, so submit/export rebase downstream stack entries onto amended bases. Commit messages become API surface: the stack-info line format is a compatibility contract with the Python tool and must not change without a migration path. The line format and per-command behavior are specified in docs/specs/submit-export.md, docs/specs/abandon.md, docs/specs/land.md, and docs/specs/fix-command.md.
+Amending metadata rewrites commit hashes, so submit/export rebase downstream stack entries onto amended bases. Commit messages become API surface: the stack-info line format is a compatibility contract with the Python tool and must not change without a migration path. The line grammar is defined in `internal/stack/entry.go`; per-command behavior lives in the submit/export, abandon, land, and fix implementations and their tests.

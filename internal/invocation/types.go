@@ -9,7 +9,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 )
 
-// CommonArgs holds resolved shared arguments across commands (SPEC §9.3).
+// CommonArgs holds resolved shared arguments across commands.
 type CommonArgs struct {
 	Base               string
 	Head               string

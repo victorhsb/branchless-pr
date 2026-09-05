@@ -1,5 +1,4 @@
 // Package pr provides thin wrappers around gh CLI commands for PR operations.
-// See SPEC §12–§15 for the expected behaviour of each command.
 package pr
 
 import (
