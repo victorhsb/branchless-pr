@@ -196,6 +196,7 @@ func Defaults() *Config {
 	c.Set("repo", "reviewer", "")
 	c.Set("repo", "branch_name_template", "$USERNAME/stack")
 	c.Set("submit", "experimental_engine", "false")
+	c.Set("submit", "keep_branches", "false")
 	c.Set("github", "native_stacks", string(NativeStacksOff))
 	c.Set("comments", "ignore_authors", "")
 	c.Set("land", "style", "bottom-only")
@@ -296,6 +297,9 @@ branch_name_template = $USERNAME/stack
 reviewer =
 
 [submit]
+# Retain local generated PR branches after export
+keep_branches = false
+
 # Enable the experimental optimized submit/export engine
 experimental_engine = false
 

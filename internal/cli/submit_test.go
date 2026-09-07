@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -489,4 +490,48 @@ func captureStderr(t *testing.T, fn func()) string {
 	os.Stderr = orig
 	<-done
 	return buf.String()
+}
+
+func TestFinishSubmitBranches(t *testing.T) {
+	for _, keep := range []bool{false, true} {
+		for _, rebase := range []bool{false, true} {
+			name := fmt.Sprintf("keep=%t/rebase=%t", keep, rebase)
+			t.Run(name, func(t *testing.T) {
+				heads := []string{"alice/stack/1", "alice/stack/2"}
+				st := stack.Stack{entryForSubmitTest("abc", heads[0], "main", "First"), entryForSubmitTest("def", heads[1], heads[0], "Second")}
+				restore := []string{"git", "checkout", "work"}
+				if rebase {
+					restore = []string{"git", "rebase", "--committer-date-is-author-date", heads[1], "work"}
+				}
+				responses := []shelltest.Response{{Match: shelltest.Exact(restore...)}}
+				if !keep {
+					responses = append(responses, shelltest.Response{Match: shelltest.Exact("git", "branch", "-D", heads[0], heads[1])})
+				}
+				run := shelltest.New(t, responses...)
+				app := &AppContext{Git: git.New("", run), OrigBranch: "work"}
+				if err := finishSubmitBranches(app, st, heads, rebase, keep); err != nil {
+					t.Fatal(err)
+				}
+				if got := len(run.Calls()); got != len(responses) {
+					t.Fatalf("got %d commands, want %d", got, len(responses))
+				}
+			})
+		}
+	}
+}
+
+func TestSubmitRejectsInvalidKeepBranchesBeforeGit(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.Set("submit", "keep_branches", "invalid")
+	run := shelltest.New(t)
+	app := &AppContext{Config: cfg, Git: git.New("", run)}
+	for _, dryRun := range []bool{false, true} {
+		err := submitImpl(app, submitOptions{DryRun: dryRun})
+		if err == nil || !strings.Contains(err.Error(), "submit.keep_branches") {
+			t.Fatalf("got %v, want config error", err)
+		}
+	}
+	if len(run.Calls()) != 0 {
+		t.Fatal("invalid setting must not execute Git commands")
+	}
 }

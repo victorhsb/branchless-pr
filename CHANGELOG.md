@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## v1.12.0 - 2026-09-07
+
+- Added `submit.keep_branches` to retain generated local PR branches after
+  submit/export. Defaults to `false`.
+
 - Fixed a security issue where a `[repo] remote` or `target` value from
   `.stack-pr.cfg` was passed to `git` as a bare positional. Because `git`
   parses a leading-dash positional as an option and accepts a transport URL

@@ -434,6 +434,17 @@ Config lives at `<repo-root>/.stack-pr.cfg` (override with `STACKPR_CONFIG`). Th
 | `reviewer` | string | *(empty)* | Comma-separated GitHub usernames to add as reviewers on new PRs. |
 | `branch_name_template` | string | `$USERNAME/stack` | Template for generated branch names. **Must contain `$ID`**. Supported substitutions: `$USERNAME`, `$ID`. |
 
+#### `[submit]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `keep_branches` | bool | `false` | Retain generated local PR branches after `submit` / `export`. |
+
+Enable with `bpr config set submit.keep_branches=true`. Retained branches point
+to the exported commits and are reset on subsequent exports. They do not
+automatically follow later amendments or rebases; export can overwrite their
+local tips, so preserve any independent work before exporting.
+
 #### `[comments]`
 
 | Key | Type | Default | Description |

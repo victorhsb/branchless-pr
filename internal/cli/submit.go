@@ -13,6 +13,7 @@ import (
 )
 
 type submitOptions struct {
+	KeepBranches bool
 	DryRun       bool
 	Draft        bool
 	KeepBody     bool
@@ -55,6 +56,12 @@ Use --dry-run to preview the planned actions without applying any local Git or G
 }
 
 func submitImpl(app *AppContext, opts submitOptions) (err error) {
+	if app.Config != nil {
+		opts.KeepBranches, err = app.Config.GetBool("submit", "keep_branches")
+		if err != nil {
+			return fmt.Errorf("invalid submit.keep_branches: %w", err)
+		}
+	}
 	receiptDest := effectiveReceiptDestination(app.Config, opts.Receipt)
 	if opts.DryRun && receiptDest != "" && receiptDest != "off" {
 		return fmt.Errorf("operation receipts are only available for real submit/export executions")
@@ -330,17 +337,9 @@ func applyMutations(app *AppContext, st stack.Stack, needsMeta, isDraft []bool, 
 		}
 	}
 
-	if needsBranchRebase {
-		if err := app.Git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
-			return fmt.Errorf("ERROR: Cannot rebase original branch: %w", err)
-		}
-	} else {
-		if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
-			return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
-		}
+	if err := finishSubmitBranches(app, st, heads, needsBranchRebase, opts.KeepBranches); err != nil {
+		return err
 	}
-
-	app.Git.DeleteLocalBranches(heads...)
 
 	if app.Args.ShowTips {
 		printSubmitTips(st)
@@ -466,6 +465,18 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		cache.updateDraft(prRef, false)
 	}
 
+	if err := finishSubmitBranches(app, st, heads, needsBranchRebase, opts.KeepBranches); err != nil {
+		return err
+	}
+
+	if app.Args.ShowTips {
+		printSubmitTips(st)
+	}
+
+	return nil
+}
+
+func finishSubmitBranches(app *AppContext, st stack.Stack, heads []string, needsBranchRebase, keepBranches bool) error {
 	if needsBranchRebase {
 		if err := app.Git.RebaseWithAuthorDate(st.Top().Head(), app.OrigBranch); err != nil {
 			return fmt.Errorf("ERROR: Cannot rebase original branch: %w", err)
@@ -476,10 +487,8 @@ func applyMutationsOptimized(app *AppContext, st stack.Stack, needsMeta, isDraft
 		}
 	}
 
-	app.Git.DeleteLocalBranches(heads...)
-
-	if app.Args.ShowTips {
-		printSubmitTips(st)
+	if !keepBranches {
+		app.Git.DeleteLocalBranches(heads...)
 	}
 
 	return nil
