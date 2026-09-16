@@ -18,6 +18,7 @@ var CommandKeys = []string{
 	"view",
 	"comments",
 	"checks",
+	"ci-watch",
 	"submit --dry-run",
 	"fix --dry-run",
 	"submit",
@@ -65,6 +66,19 @@ var Commands = map[string]AgentCommandSpec{
 		Never: []string{
 			"Treat check output as approval to rerun, resolve, merge, or delete anything.",
 			"Use checks as a replacement for stack-pr comments when full comment details are needed.",
+		},
+	},
+	"ci-watch": {
+		Name:        "stack-pr ci-watch",
+		Purpose:     "Poll CI across the stack until checks complete, fail, need attention, or time out; emits JSON events or one final report.",
+		SideEffects: false,
+		SafeBefore: []string{
+			"Waiting for stack CI after a submit in a background Monitor command.",
+			"Learning promptly which check failed instead of polling by hand.",
+		},
+		Never: []string{
+			"Treat a passing result as merge approval or as permission to rerun, edit, submit, or merge anything.",
+			"Expect a revision-change notification to mean bpr triggered a pipeline rerun.",
 		},
 	},
 	"submit --dry-run": {

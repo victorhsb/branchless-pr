@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added `bpr ci-watch`, a stack-scoped CI watcher for agent-driven monitoring.
+  It polls every PR in the current stack, follows the latest remote head of
+  each PR, and returns when checks complete acceptably, a check fails or needs
+  attention, the rolling 15-minute timeout expires, or observation fails. Live
+  mode (default) streams one JSON event per stdout line only when something
+  changes; `--no-live` emits a single aggregated final JSON report. A revision
+  change resets the rolling timeout; a revision that reports no checks is
+  accepted only after empty observations span at least two minutes.
+
 ## v1.12.0 - 2026-09-07
 
 - Added `submit.keep_branches` to retain generated local PR branches after

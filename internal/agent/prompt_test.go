@@ -154,6 +154,7 @@ func TestRenderJSONSideEffectMetadata(t *testing.T) {
 		"stack-pr view":             false,
 		"stack-pr comments":         false,
 		"stack-pr checks":           false,
+		"stack-pr ci-watch":         false,
 		"stack-pr submit --dry-run": false,
 		"stack-pr fix --dry-run":    false,
 		"stack-pr submit":           true,

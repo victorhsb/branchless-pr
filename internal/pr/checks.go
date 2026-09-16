@@ -95,6 +95,23 @@ func (c *Client) FetchChecks(prRef string) (*PullRequestChecks, error) {
 	return ParsePRChecks(out)
 }
 
+// FetchChecksForWatch fetches read-only PR check state and the remote head SHA
+// for CI polling. Unlike FetchChecks it skips comments and reviews, which
+// polling does not need.
+func (c *Client) FetchChecksForWatch(prRef string) (*PullRequestChecks, error) {
+	if err := ValidateRef(prRef); err != nil {
+		return nil, err
+	}
+	out, err := c.runGHJSON([]string{
+		"gh", "pr", "view", prRef,
+		"--json", "number,url,headRefName,baseRefName,headRefOid,statusCheckRollup",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view checks %s: %w", prRef, err)
+	}
+	return ParsePRChecks(out)
+}
+
 type ghPRChecks struct {
 	Number            int               `json:"number"`
 	URL               string            `json:"url"`

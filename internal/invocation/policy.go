@@ -18,7 +18,7 @@ func PolicyFor(command string, inAgentSubtree, inConfigSubtree bool) CommandPoli
 
 	policy := CommandPolicy{RequiresTarget: true}
 	switch command {
-	case "view", "comments", "checks":
+	case "view", "comments", "checks", "ci-watch":
 		policy.AllowsDirty = true
 	case "submit", "export":
 		policy.UsesStash = true

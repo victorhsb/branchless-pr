@@ -116,6 +116,7 @@ bpr submit --reviewer alice,bob   # add reviewers
 bpr checks                        # human-readable
 bpr checks --format json          # machine-readable
 bpr checks --failed-only          # filter to failures only
+bpr ci-watch                      # poll until checks complete or need action
 ```
 
 **Collecting review feedback:**
@@ -168,6 +169,7 @@ All major commands support `--format json` for agent consumption:
 | `bpr view` | `--format json` |
 | `bpr comments` | `--format json` |
 | `bpr checks` | `--format json` |
+| `bpr ci-watch` | always JSON (live events or one final report) |
 | `bpr agent diagnose` | `--format json` |
 
 ### Getting help
@@ -218,6 +220,7 @@ bpr abandon
 | `bpr view` | Inspect the stack without modifying anything. Includes native Stack metadata in JSON when enabled. |
 | `bpr comments` | Collect PR comments, reviews, and review threads across the stack. |
 | `bpr checks` | Report all CI checks and brief review-attention state across the stack. |
+| `bpr ci-watch` | Poll CI across the stack until checks complete, fail, need attention, or time out. Streams JSON events or emits one final JSON report. |
 | `bpr land` | Squash-merge the bottom PR and rebase the rest. `--whole-stack` queues the tip PR for merge queue landing. Refuses to land stacks linked to a GitHub native Stack. |
 | `bpr abandon` | Strip stack metadata and delete generated branches. Unstacks matching GitHub native Stacks before deleting remote branches. |
 | `bpr fix --pr <number>` | Repair the local `HEAD` commit's stack metadata from an existing PR. Local-only: amends the commit message, never touches remotes or GitHub. Supports `--dry-run` and `--replace`. |
@@ -346,6 +349,49 @@ bpr checks --commit abc123
 | `--required-only` | Include only checks known to be required. Checks whose required state is unknown are excluded. |
 | `--pr` | Include only the stack entry associated with the given pull request number. |
 | `--commit` | Include only the stack entry matching a full or unambiguous abbreviated commit SHA. |
+
+## CI watch
+
+`bpr ci-watch` polls GitHub CI for every pull request in the current stack and
+returns when the agent needs to act or the stack's checks complete. Every check
+counts, not only branch-protection-required checks. It is designed for agents:
+run it in a background Monitor command and let each stdout line wake the agent,
+or call it as a blocking command and read the final report.
+
+```bash
+bpr ci-watch                                     # live events, 1m interval, 15m rolling timeout
+bpr ci-watch --live --interval 1m --timeout 15m  # explicit defaults
+bpr ci-watch --no-live --interval 30s            # one aggregated final report
+```
+
+Live mode (default) streams one complete JSON event per stdout line, flushed
+immediately: an initial state record, observed check transitions, revision
+changes, and a final event containing the full report. Unchanged polls stay
+quiet. Buffered mode (`--no-live`) emits a single JSON report when the watch
+ends, including on timeout or error. Both modes share the same final
+assessment and exit codes: `0` on success, `1` otherwise.
+
+Completion rules: `success`, `skipped`, and `neutral` count as completed. The
+first observed failure returns promptly with the latest state of every other
+check. Cancellations and approval requirements such as `action_required`
+surface as needing attention. Pending or running checks keep the watch alive.
+
+The watch follows the latest remote head of each PR. A new revision emits a
+notification, replaces the watched checks, and resets the rolling `--timeout`
+deadline; ordinary check transitions do not. A revision that reports no checks
+is accepted only after successful empty observations span at least two
+minutes, which lets workflows register after a push. On timeout the report
+identifies outstanding checks and suggests inspecting URLs or watching again.
+
+The `--timeout` flag is bpr's own rolling deadline. A harness that runs bpr in
+the background may impose its own process timeout independently; set bpr's
+deadline with that in mind. A passing result is not merge approval.
+
+| Flag | Description |
+| ---- | ----------- |
+| `--live` / `--no-live` | Stream JSON events (default) or emit one aggregated final JSON report. |
+| `--interval` | Polling interval; the first poll runs immediately (default `1m`). |
+| `--timeout` | Rolling stack-wide timeout; resets when any watched PR changes revision (default `15m`). |
 
 ## Agent prompt
 
