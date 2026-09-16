@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.13.0 - 2026-09-16
+
 - Added `bpr ci-watch`, a stack-scoped CI watcher for agent-driven monitoring.
   It polls every PR in the current stack, follows the latest remote head of
   each PR, and returns when checks complete acceptably, a check fails or needs
