@@ -2,7 +2,6 @@ package git
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
@@ -53,16 +52,8 @@ func (r *Repo) RepoRoot() (string, error) {
 // HasTrackedChanges reports whether porcelain status contains staged or
 // unstaged tracked changes. Untracked files do not make the repository dirty.
 func (r *Repo) HasTrackedChanges() (bool, error) {
-	out, err := r.runner().Output([]string{"git", "status", "--porcelain"}, r.opts(shell.RunOpts{}))
-	if err != nil {
-		return false, &Error{Op: "uncommitted_changes", Err: err}
-	}
-	for _, line := range strings.Split(out, "\n") {
-		if line != "" && !strings.HasPrefix(line, "??") {
-			return true, nil
-		}
-	}
-	return false, nil
+	count, err := r.TrackedChangeCount()
+	return count > 0, err
 }
 
 // Checkout creates or resets branch from startPoint.

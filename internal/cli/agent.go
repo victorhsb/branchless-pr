@@ -52,6 +52,8 @@ func agentDiagnoseCmd() *cobra.Command {
 				Head:               ca.Head,
 				BranchNameTemplate: ca.BranchNameTemplate,
 				Online:             online,
+				Git:                app.Git,
+				GitHub:             app.PR,
 			})
 
 			switch format {

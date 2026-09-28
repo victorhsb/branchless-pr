@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/victorhsb/branchless-pr/internal/git"
+	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 )
 
@@ -40,12 +42,12 @@ func (f *fakeRunner) Run(args []string, opts shell.RunOpts) ([]byte, []byte, err
 	return f.runStdout[key], f.runStderr[key], f.runErrs[key]
 }
 
-func (f *fakeRunner) LookPath(file string) (string, error) {
-	if f.lookPathErr != nil {
-		return "", f.lookPathErr
-	}
-	return "/usr/bin/" + file, nil
+type testGitHub struct {
+	*pr.Client
+	lookPathErr error
 }
+
+func (g testGitHub) LookPath() error { return g.lookPathErr }
 
 func TestOfflineRunUsesOnlyReadOnlyGitCommandsAndDoesNotInvokeGH(t *testing.T) {
 	base := strings.Repeat("a", 40)
@@ -60,7 +62,7 @@ func TestOfflineRunUsesOnlyReadOnlyGitCommandsAndDoesNotInvokeGH(t *testing.T) {
 		key("git", "rev-parse", "--verify", base):            base,
 		key("git", "rev-list", "--header", "^"+base, "HEAD"): "",
 	}, rejectGH: true}
-	report := Run(Options{Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	if report.Repo.Online {
 		t.Fatal("online unexpectedly true")
 	}
@@ -88,7 +90,7 @@ func TestOnlineGitHubAvailabilityOK(t *testing.T) {
 	f := &fakeRunner{outputs: map[string]string{
 		key("git", "rev-parse", "--show-toplevel"): "/repo",
 	}}
-	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	c, ok := findCheck(report.Checks, "github_availability")
 	if !ok {
 		t.Fatal("missing github_availability check")
@@ -103,7 +105,7 @@ func TestOnlineGitHubAvailabilityOK(t *testing.T) {
 
 func TestGitHubAvailabilitySkipsProbeWhenGHMissing(t *testing.T) {
 	f := &fakeRunner{lookPathErr: errors.New("not found")}
-	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	c, ok := findCheck(report.Checks, "github_availability")
 	if !ok {
 		t.Fatal("missing github_availability check")
@@ -138,7 +140,7 @@ func TestGitHubAvailabilityOutageIsBlockingAndSkipsPRState(t *testing.T) {
 			key("gh", "api", "/rate_limit"): errors.New("exit status 1"),
 		},
 	}
-	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	c, ok := findCheck(report.Checks, "github_availability")
 	if !ok {
 		t.Fatal("missing github_availability check")
@@ -175,7 +177,7 @@ func TestGitHubAvailabilityAuthFailureIsNotOutage(t *testing.T) {
 			key("gh", "api", "/rate_limit"): errors.New("exit status 1"),
 		},
 	}
-	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	c, ok := findCheck(report.Checks, "github_availability")
 	if !ok {
 		t.Fatal("missing github_availability check")
@@ -207,7 +209,7 @@ func TestOnlinePRStateReportsRepositorySpecificFailureWhenGitHubReachable(t *tes
 			key("gh", "pr", "view", "https://github.com/foo/bar/pull/42", "--json", "baseRefName,headRefName,number,state,mergeStateStatus,isDraft"): errors.New("HTTP 404: Not Found"),
 		},
 	}
-	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Runner: f})
+	report := Run(Options{Online: true, Remote: "origin", Target: "main", Head: "HEAD", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{pr.NewClient(f), f.lookPathErr}})
 	avail, ok := findCheck(report.Checks, "github_availability")
 	if !ok || avail.Status != StatusOK {
 		t.Fatalf("github_availability = %+v, ok=%v", avail, ok)
@@ -430,4 +432,47 @@ author Alice <alice@example.com> 0 +0000
     
     stack-info: PR: https://github.com/foo/bar/pull/42, branch: alice/stack/1
 `
+}
+
+func TestDiagnosticStatusAndMessageContract(t *testing.T) {
+	base, head := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	view := key("gh", "pr", "view", "https://github.com/foo/bar/pull/42", "--json", "baseRefName,headRefName,number,state,mergeStateStatus,isDraft")
+	tests := []struct {
+		name, check string
+		configure   func(*fakeRunner)
+		status      Status
+		message     string
+	}{
+		{"clean", "working_tree_clean", func(f *fakeRunner) {}, StatusOK, "working tree has no tracked staged or unstaged changes"},
+		{"dirty", "working_tree_clean", func(f *fakeRunner) {
+			f.outputs[key("git", "status", "--porcelain")] = " M tracked\n?? untracked\nA  staged"
+		}, StatusBlocking, "working tree has 2 tracked staged or unstaged change(s)"},
+		{"auth failure", "github_authentication", func(f *fakeRunner) { f.runErrs[key("gh", "auth", "status")] = errors.New("login required") }, StatusWarning, "gh authentication check failed: login required"},
+		{"unknown availability", "github_availability", func(f *fakeRunner) { f.runErrs[key("gh", "api", "/rate_limit")] = errors.New("unclassified failure") }, StatusUnknown, "GitHub availability could not be determined via gh: unclassified failure"},
+		{"open PR", "online_pr_state", func(f *fakeRunner) {}, StatusOK, "queried live state for 1 PR(s)"},
+		{"closed PR", "online_pr_state", func(f *fakeRunner) { f.outputs[view] = `{"number":42,"state":"CLOSED"}` }, StatusWarning, "PR #42 for entry 0 is not open (state=CLOSED)"},
+		{"head mismatch", "online_pr_state", func(f *fakeRunner) { f.outputs[view] = `{"number":42,"state":"OPEN","headRefName":"other"}` }, StatusWarning, `PR #42 head is "other" but metadata head is "alice/stack/1"`},
+		{"base mismatch", "online_pr_state", func(f *fakeRunner) { f.outputs[view] = `{"number":42,"state":"OPEN","baseRefName":"other"}` }, StatusWarning, `PR #42 base is "other" but expected "main"`},
+		{"malformed PR", "online_pr_state", func(f *fakeRunner) { f.outputs[view] = "{" }, StatusUnknown, "could not parse PR state for entry 0: unexpected end of JSON input"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &fakeRunner{outputs: map[string]string{
+				key("git", "rev-parse", "--show-toplevel"):           "/repo",
+				key("git", "rev-parse", "--git-dir"):                 t.TempDir(),
+				key("git", "rev-parse", "--verify", "HEAD"):          head,
+				key("git", "merge-base", "HEAD", "origin/main"):      base,
+				key("git", "rev-parse", "--verify", "origin/main"):   base,
+				key("git", "rev-parse", "--verify", base):            base,
+				key("git", "rev-list", "--header", "^"+base, "HEAD"): commitHeader(head),
+				view: `{"number":42,"state":"OPEN","headRefName":"alice/stack/1","baseRefName":"main"}`,
+			}, runErrs: map[string]error{}}
+			tt.configure(f)
+			report := Run(Options{Online: true, Remote: "origin", Target: "main", BranchNameTemplate: "$USERNAME/stack", Git: git.New("", f), GitHub: testGitHub{Client: pr.NewClient(f)}})
+			got, ok := findCheck(report.Checks, tt.check)
+			if !ok || got.Status != tt.status || got.Message != tt.message {
+				t.Fatalf("check = %+v, want %s: %s", got, tt.status, tt.message)
+			}
+		})
+	}
 }
