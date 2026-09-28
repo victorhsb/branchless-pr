@@ -1,14 +1,11 @@
 package diagnose
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/victorhsb/branchless-pr/internal/pr"
-	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
@@ -19,25 +16,21 @@ type Options struct {
 	Head               string
 	BranchNameTemplate string
 	Online             bool
-	WorkDir            string
-	Runner             Runner
+	Git                Git
+	GitHub             GitHub
 }
 
 type inspector struct {
 	opts   Options
-	run    Runner
 	report Report
 	st     stack.Stack
 }
 
 func Run(opts Options) Report {
-	if opts.Runner == nil {
-		opts.Runner = DefaultRunner{}
-	}
 	if opts.Head == "" {
 		opts.Head = "HEAD"
 	}
-	i := &inspector{opts: opts, run: opts.Runner}
+	i := &inspector{opts: opts}
 	i.report = Report{
 		SchemaVersion: SchemaVersion,
 		Status:        StatusUnknown,
@@ -89,21 +82,13 @@ func (i *inspector) add(id string, fn func() (CheckEntry, error)) {
 	entry.ID = id
 }
 
-func (i *inspector) gitOutput(args ...string) (string, error) {
-	return i.run.Output(append([]string{"git"}, args...), shell.RunOpts{Dir: i.opts.WorkDir})
-}
-
-func (i *inspector) gitRun(args ...string) ([]byte, []byte, error) {
-	return i.run.Run(append([]string{"git"}, args...), shell.RunOpts{Dir: i.opts.WorkDir, Quiet: true, Check: false})
-}
-
 func (i *inspector) checkGitRepository() (CheckEntry, error) {
-	root, err := i.gitOutput("rev-parse", "--show-toplevel")
+	root, err := i.opts.Git.RepoRoot()
 	if err != nil {
 		return CheckEntry{Status: StatusBlocking, Message: "current directory is not inside a Git repository", Blocks: []string{"view", "submit", "land", "abandon"}, SuggestedFix: "Change into a Git repository that contains the stack you want to inspect."}, nil
 	}
 	i.report.Repo.Root = root
-	branch, err := i.gitOutput("rev-parse", "--abbrev-ref", "HEAD")
+	branch, err := i.opts.Git.CurrentBranchName()
 	if err == nil {
 		i.report.Repo.CurrentBranch = branch
 	}
@@ -111,7 +96,7 @@ func (i *inspector) checkGitRepository() (CheckEntry, error) {
 }
 
 func (i *inspector) checkGHInstalled() (CheckEntry, error) {
-	if _, err := i.run.LookPath("gh"); err != nil {
+	if err := i.opts.GitHub.LookPath(); err != nil {
 		return CheckEntry{Status: StatusWarning, Message: "gh CLI was not found on PATH"}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: "gh CLI is installed"}, nil
@@ -121,10 +106,10 @@ func (i *inspector) checkGitHubAuth() (CheckEntry, error) {
 	if !i.opts.Online {
 		return CheckEntry{Status: StatusUnknown, Message: "GitHub authentication was not checked because --online was not specified"}, nil
 	}
-	if _, err := i.run.LookPath("gh"); err != nil {
+	if err := i.opts.GitHub.LookPath(); err != nil {
 		return CheckEntry{Status: StatusUnknown, Message: "GitHub authentication cannot be checked because gh is not installed"}, nil
 	}
-	_, _, err := i.run.Run([]string{"gh", "auth", "status"}, shell.RunOpts{Dir: i.opts.WorkDir, Quiet: true, Check: false})
+	err := i.opts.GitHub.AuthStatus()
 	if err != nil {
 		return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("gh authentication check failed: %v", err)}, nil
 	}
@@ -135,16 +120,15 @@ func (i *inspector) checkGitHubAvailability() (CheckEntry, error) {
 	if !i.opts.Online {
 		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability was not checked because --online was not specified"}, nil
 	}
-	if _, err := i.run.LookPath("gh"); err != nil {
+	if err := i.opts.GitHub.LookPath(); err != nil {
 		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability cannot be checked because gh is not installed"}, nil
 	}
 
-	out, stderr, err := i.run.Run([]string{"gh", "api", "/rate_limit"}, shell.RunOpts{Dir: i.opts.WorkDir, Quiet: true, Check: false})
+	detail, err := i.opts.GitHub.ProbeAvailability()
 	if err == nil {
 		return CheckEntry{Status: StatusOK, Message: "GitHub appears reachable via gh"}, nil
 	}
 
-	detail := strings.TrimSpace(strings.Join([]string{string(out), string(stderr), err.Error()}, " "))
 	if isGitHubAuthFailure(detail) {
 		return CheckEntry{Status: StatusUnknown, Message: "GitHub availability was not classified as an outage because gh reported an authentication or authorization failure"}, nil
 	}
@@ -163,19 +147,12 @@ func (i *inspector) checkWorkingTreeClean() (CheckEntry, error) {
 	if !i.inGitRepo() {
 		return CheckEntry{Status: StatusUnknown, Message: "working tree cleanliness cannot be checked outside a Git repository"}, nil
 	}
-	out, err := i.gitOutput("status", "--porcelain")
+	count, err := i.opts.Git.TrackedChangeCount()
 	if err != nil {
 		return CheckEntry{}, err
 	}
-	var dirty []string
-	for _, line := range strings.Split(out, "\n") {
-		if len(line) < 2 || strings.HasPrefix(line, "??") {
-			continue
-		}
-		dirty = append(dirty, strings.TrimSpace(line))
-	}
-	if len(dirty) > 0 {
-		return CheckEntry{Status: StatusBlocking, Message: fmt.Sprintf("working tree has %d tracked staged or unstaged change(s)", len(dirty)), Blocks: []string{"submit", "land", "abandon"}, SuggestedFix: "Commit, stash, or revert tracked changes before running mutating stack-pr commands."}, nil
+	if count > 0 {
+		return CheckEntry{Status: StatusBlocking, Message: fmt.Sprintf("working tree has %d tracked staged or unstaged change(s)", count), Blocks: []string{"submit", "land", "abandon"}, SuggestedFix: "Commit, stash, or revert tracked changes before running mutating stack-pr commands."}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: "working tree has no tracked staged or unstaged changes"}, nil
 }
@@ -184,21 +161,12 @@ func (i *inspector) checkRebaseInProgress() (CheckEntry, error) {
 	if !i.inGitRepo() {
 		return CheckEntry{Status: StatusUnknown, Message: "rebase state cannot be checked outside a Git repository"}, nil
 	}
-	gitDir, err := i.gitOutput("rev-parse", "--git-dir")
+	active, err := i.opts.Git.RebaseInProgress()
 	if err != nil {
 		return CheckEntry{}, err
 	}
-	if !filepath.IsAbs(gitDir) {
-		base := i.opts.WorkDir
-		if base == "" {
-			base, _ = os.Getwd()
-		}
-		gitDir = filepath.Join(base, gitDir)
-	}
-	for _, name := range []string{"rebase-merge", "rebase-apply"} {
-		if _, err := os.Stat(filepath.Join(gitDir, name)); err == nil {
-			return CheckEntry{Status: StatusBlocking, Message: "a Git rebase is in progress", Blocks: []string{"submit", "land", "abandon"}, SuggestedFix: "Finish the rebase with git rebase --continue or abort it with git rebase --abort before running stack-pr operations."}, nil
-		}
+	if active {
+		return CheckEntry{Status: StatusBlocking, Message: "a Git rebase is in progress", Blocks: []string{"submit", "land", "abandon"}, SuggestedFix: "Finish the rebase with git rebase --continue or abort it with git rebase --abort before running stack-pr operations."}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: "no rebase is in progress"}, nil
 }
@@ -208,18 +176,18 @@ func (i *inspector) checkBaseHeadResolution() (CheckEntry, error) {
 		return CheckEntry{Status: StatusUnknown, Message: "base/head cannot be resolved outside a Git repository"}, nil
 	}
 	head := i.opts.Head
-	if _, err := i.gitOutput("rev-parse", "--verify", head); err != nil {
+	if _, err := i.opts.Git.RevParse(head); err != nil {
 		return CheckEntry{Status: StatusBlocking, Message: fmt.Sprintf("head revision %q could not be resolved", head), Blocks: []string{"view", "submit", "land", "abandon"}, SuggestedFix: "Pass a valid --head revision or repair the repository state."}, nil
 	}
 	base := i.opts.Base
 	if base == "" {
-		mb, err := i.gitOutput("merge-base", head, i.opts.Remote+"/"+i.opts.Target)
+		mb, err := i.opts.Git.MergeBase(head, i.opts.Remote+"/"+i.opts.Target)
 		if err != nil {
 			return CheckEntry{Status: StatusBlocking, Message: "base revision could not be deduced from HEAD and the remote target", Blocks: []string{"view", "submit", "land", "abandon"}, SuggestedFix: "Fetch or configure the target branch, or pass an explicit --base revision."}, nil
 		}
 		base = mb
 		i.report.Repo.Base = mb
-	} else if _, err := i.gitOutput("rev-parse", "--verify", base); err != nil {
+	} else if _, err := i.opts.Git.RevParse(base); err != nil {
 		return CheckEntry{Status: StatusBlocking, Message: fmt.Sprintf("base revision %q could not be resolved", base), Blocks: []string{"view", "submit", "land", "abandon"}, SuggestedFix: "Pass a valid --base revision."}, nil
 	}
 	i.report.Repo.Head = head
@@ -231,7 +199,7 @@ func (i *inspector) checkTargetBranchExists() (CheckEntry, error) {
 		return CheckEntry{Status: StatusUnknown, Message: "target branch cannot be checked outside a Git repository"}, nil
 	}
 	ref := i.opts.Remote + "/" + i.opts.Target
-	if _, err := i.gitOutput("rev-parse", "--verify", ref); err != nil {
+	if _, err := i.opts.Git.RevParse(ref); err != nil {
 		return CheckEntry{Status: StatusBlocking, Message: fmt.Sprintf("target branch %s is not available locally", ref), Blocks: []string{"view", "submit", "land"}, SuggestedFix: "Ensure the configured remote target exists locally, or pass --remote/--target for the correct target."}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: fmt.Sprintf("target branch %s is available locally", ref)}, nil
@@ -310,16 +278,16 @@ func (i *inspector) checkLocalBaseBehindRemoteTarget() (CheckEntry, error) {
 		return CheckEntry{Status: StatusUnknown, Message: "local base behind remote target cannot be checked because base is unresolved"}, nil
 	}
 	remoteTarget := i.opts.Remote + "/" + i.opts.Target
-	baseHash, err := i.gitOutput("rev-parse", "--verify", base)
+	baseHash, err := i.opts.Git.RevParse(base)
 	if err != nil {
 		return CheckEntry{}, err
 	}
-	targetHash, err := i.gitOutput("rev-parse", "--verify", remoteTarget)
+	targetHash, err := i.opts.Git.RevParse(remoteTarget)
 	if err != nil {
 		return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("remote target %s could not be resolved locally", remoteTarget)}, nil
 	}
-	_, _, ancErr := i.gitRun("merge-base", "--is-ancestor", base, remoteTarget)
-	if ancErr == nil && baseHash != targetHash {
+	ancestor, ancErr := i.opts.Git.IsAncestor(base, remoteTarget)
+	if ancErr == nil && ancestor && baseHash != targetHash {
 		return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("local base %s is behind %s", base, remoteTarget)}, nil
 	}
 	return CheckEntry{Status: StatusOK, Message: "local base is not behind the remote target"}, nil
@@ -344,18 +312,13 @@ func (i *inspector) checkOnlinePRState() (CheckEntry, error) {
 		if err := pr.ValidateRef(e.PR()); err != nil {
 			return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("entry %d has an unusable PR reference: %v", idx, err)}, nil
 		}
-		out, err := i.run.Output([]string{"gh", "pr", "view", e.PR(), "--json", "baseRefName,headRefName,number,state,mergeStateStatus,isDraft"}, shell.RunOpts{Dir: i.opts.WorkDir})
+		info, err := i.opts.GitHub.InspectPR(e.PR())
 		if err != nil {
+			var decode *pr.DecodeError
+			if errors.As(err, &decode) {
+				return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("could not parse PR state for entry %d: %v", idx, decode.Err)}, nil
+			}
 			return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("could not query PR state for entry %d: %v", idx, err)}, nil
-		}
-		var info struct {
-			BaseRefName string `json:"baseRefName"`
-			HeadRefName string `json:"headRefName"`
-			Number      int    `json:"number"`
-			State       string `json:"state"`
-		}
-		if err := json.Unmarshal([]byte(out), &info); err != nil {
-			return CheckEntry{Status: StatusUnknown, Message: fmt.Sprintf("could not parse PR state for entry %d: %v", idx, err)}, nil
 		}
 		if info.State != "OPEN" {
 			return CheckEntry{Status: StatusWarning, Message: fmt.Sprintf("PR #%d for entry %d is not open (state=%s)", info.Number, idx, info.State)}, nil
@@ -435,7 +398,7 @@ func (i *inspector) inGitRepo() bool {
 }
 
 func (i *inspector) discover(base, head string) (stack.Stack, error) {
-	out, err := i.gitOutput("rev-list", "--header", "^"+base, head)
+	out, err := i.opts.Git.RevListHeaders(base, head)
 	if err != nil {
 		return nil, fmt.Errorf("rev-list: %w", err)
 	}

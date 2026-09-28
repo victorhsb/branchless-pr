@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	prompt "github.com/victorhsb/branchless-pr/internal/agent"
 	"github.com/victorhsb/branchless-pr/internal/shell"
+	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
 )
 
 func TestUserFacingCommandsHaveAgentRegistryEntries(t *testing.T) {
@@ -277,4 +279,38 @@ func chdirForTest(t *testing.T, dir string) {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
+}
+
+func TestAgentDiagnoseUsesInjectedCommandBoundaries(t *testing.T) {
+	run := shelltest.New(t,
+		shelltest.Response{Match: shelltest.Exact("git", "rev-parse", "--show-toplevel"), Err: errors.New("not a repository")},
+		shelltest.Response{Match: shelltest.Exact("git", "rev-parse", "--show-toplevel"), Err: errors.New("not a repository")},
+	)
+	args := []string{"agent", "diagnose", "--format", "json"}
+	cmd, err := newRootCommand("bpr", args, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("reportable failure returned nonzero: %v", err)
+	}
+	var report struct {
+		Checks []struct{ ID, Status, Message string }
+	}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range report.Checks {
+		if check.ID == "git_repository" {
+			if check.Status != "blocking" || check.Message != "current directory is not inside a Git repository" {
+				t.Fatalf("injected repository result was ignored: %+v", check)
+			}
+			return
+		}
+	}
+	t.Fatal("missing repository check")
 }
