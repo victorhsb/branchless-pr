@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -245,7 +246,13 @@ func (w *watcher) applyChecks(pw *prWatch, checks []pr.Check, now time.Time, ini
 	next := make(map[string]*checkObs, len(checks))
 	order := make([]string, 0, len(checks))
 	for _, c := range checks {
+		if superseded(c, checks) {
+			continue
+		}
 		key := execKey(c)
+		if _, exists := next[key]; exists {
+			continue
+		}
 		obs := &checkObs{check: c, state: classifyCheck(c), observedAt: now}
 		next[key] = obs
 		order = append(order, key)
@@ -461,6 +468,35 @@ func classifyCheck(c pr.Check) string {
 	default:
 		return StateAttention
 	}
+}
+
+// superseded drops an execution only when the same poll contains a provably
+// newer execution of that check. Unknown ordering keeps both results visible.
+func superseded(c pr.Check, checks []pr.Check) bool {
+	for _, other := range checks {
+		if other.ID == c.ID && newerExecution(other, c) {
+			return true
+		}
+	}
+	return false
+}
+
+func newerExecution(a, b pr.Check) bool {
+	at, aerr := time.Parse(time.RFC3339Nano, a.StartedAt)
+	bt, berr := time.Parse(time.RFC3339Nano, b.StartedAt)
+	if aerr == nil && berr == nil && !at.IsZero() && !bt.IsZero() && !at.Equal(bt) {
+		return at.After(bt)
+	}
+	// Numeric IDs also cover queued jobs without start times. Compare workflow
+	// runs before jobs; opaque GraphQL node IDs carry no ordering information.
+	for _, ids := range [][2]string{{a.RunID, b.RunID}, {a.CheckRunID, b.CheckRunID}, {a.ProviderID, b.ProviderID}} {
+		ai, aerr := strconv.ParseUint(ids[0], 10, 64)
+		bi, berr := strconv.ParseUint(ids[1], 10, 64)
+		if aerr == nil && berr == nil && ai != bi {
+			return ai > bi
+		}
+	}
+	return false
 }
 
 // execKey identifies one execution of a check, preferring execution identity

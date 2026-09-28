@@ -835,3 +835,106 @@ func writeFile(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestWatchSupersededExecutionsOnSameRevision(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		for _, conclusion := range []string{"cancelled", "failure"} {
+			for _, reverse := range []bool{false, true} {
+				t.Run(fmt.Sprintf("live=%t/old=%s/reverse=%t", live, conclusion, reverse), func(t *testing.T) {
+					old := mkCheck("build", "9", "99", "completed", conclusion)
+					newer := mkCheck("build", "10", "100", "queued", "")
+					checks := []pr.Check{old, newer}
+					if reverse {
+						checks[0], checks[1] = checks[1], checks[0]
+					}
+					fetch := newScriptFetcher(t)
+					fetch.on(ref7,
+						fetchStep{result: prResult(7, "aaa", checks...)},
+						fetchStep{result: prResult(7, "aaa", old, mkCheck("build", "10", "100", "completed", "success"))},
+					)
+					opts := defaultOpts()
+					opts.Live = live
+					report, out := runWatch(opts, []Target{target(1, ref7)}, fetch.fetch, &fakeClock{now: time.Now()})
+					if report.Outcome != OutcomeSuccess || fetch.calls[ref7] != 2 {
+						t.Fatalf("outcome = %s, calls = %d", report.Outcome, fetch.calls[ref7])
+					}
+					if checks := report.PullRequests[0].Checks; len(checks) != 1 || checks[0].CheckRunID != "10" {
+						t.Fatalf("current checks = %+v", checks)
+					}
+					if strings.Contains(out.String(), conclusion) {
+						t.Fatalf("superseded conclusion leaked into output: %s", out)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestWatchCancellationWithoutReplacementNeedsAttention(t *testing.T) {
+	fetch := newScriptFetcher(t)
+	fetch.on(ref7, fetchStep{result: prResult(7, "aaa", mkCheck("build", "9", "99", "completed", "cancelled"))})
+	report, _ := runWatch(defaultOpts(), []Target{target(1, ref7)}, fetch.fetch, &fakeClock{now: time.Now()})
+	if report.Outcome != OutcomeAttention {
+		t.Fatalf("outcome = %s", report.Outcome)
+	}
+}
+
+func TestNewerExecution(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		older, newer pr.Check
+	}{
+		{"timestamps", pr.Check{StartedAt: "2026-09-28T10:00:00Z"}, pr.Check{StartedAt: "2026-09-28T08:00:01-02:00"}},
+		{"run IDs", pr.Check{RunID: "9"}, pr.Check{RunID: "10"}},
+		{"check run IDs", pr.Check{RunID: "1", CheckRunID: "9"}, pr.Check{RunID: "1", CheckRunID: "10"}},
+		{"provider IDs", pr.Check{ProviderID: "9"}, pr.Check{ProviderID: "10"}},
+		{"equal timestamps", pr.Check{StartedAt: "2026-09-28T10:00:00Z", RunID: "9"}, pr.Check{StartedAt: "2026-09-28T10:00:00Z", RunID: "10"}},
+		{"queued replacement", pr.Check{StartedAt: "2026-09-28T10:00:00Z", RunID: "9"}, pr.Check{StartedAt: "0001-01-01T00:00:00Z", RunID: "10"}},
+		{"invalid timestamps", pr.Check{StartedAt: "invalid", RunID: "9"}, pr.Check{RunID: "10"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if !newerExecution(tt.newer, tt.older) || newerExecution(tt.older, tt.newer) {
+				t.Fatal("execution ordering is incorrect")
+			}
+		})
+	}
+	if newerExecution(pr.Check{ProviderID: "opaque-B"}, pr.Check{ProviderID: "opaque-A"}) {
+		t.Fatal("opaque IDs must not establish ordering")
+	}
+}
+
+func TestWatchSupersessionKeepsDifferentWorkflowsAndJobs(t *testing.T) {
+	checks := []pr.Check{
+		mkCheck("github-actions:first:build", "9", "99", "completed", "cancelled"),
+		mkCheck("github-actions:second:build", "10", "100", "completed", "success"),
+		mkCheck("github-actions:first:test", "11", "100", "completed", "success"),
+	}
+	fetch := newScriptFetcher(t)
+	fetch.on(ref7, fetchStep{result: prResult(7, "aaa", checks...)})
+	report, _ := runWatch(defaultOpts(), []Target{target(1, ref7)}, fetch.fetch, &fakeClock{now: time.Now()})
+	if report.Outcome != OutcomeAttention || len(report.PullRequests[0].Checks) != 3 {
+		t.Fatalf("unrelated checks superseded: %+v", report)
+	}
+}
+
+func TestWatchReplacementSuppressesOldTransition(t *testing.T) {
+	fetch := newScriptFetcher(t)
+	fetch.on(ref7,
+		fetchStep{result: prResult(7, "aaa", mkCheck("build", "9", "99", "in_progress", ""))},
+		fetchStep{result: prResult(7, "aaa", mkCheck("build", "9", "99", "completed", "cancelled"), mkCheck("build", "10", "100", "queued", ""))},
+		fetchStep{result: prResult(7, "aaa", mkCheck("build", "9", "99", "completed", "cancelled"), mkCheck("build", "10", "100", "completed", "success"))},
+	)
+	report, out := runWatch(defaultOpts(), []Target{target(1, ref7)}, fetch.fetch, &fakeClock{now: time.Now()})
+	if report.Outcome != OutcomeSuccess || strings.Contains(out.String(), "cancelled") {
+		t.Fatalf("superseded transition reported: %s", out)
+	}
+	var transitions []string
+	for _, event := range parseLiveEvents(t, out) {
+		if event.Type == eventCheck {
+			transitions = append(transitions, event.Transition)
+		}
+	}
+	if !reflect.DeepEqual(transitions, []string{"rerun", "changed"}) {
+		t.Fatalf("transitions = %v", transitions)
+	}
+}
