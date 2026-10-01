@@ -81,10 +81,9 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 		}
 		return nil
 	case nativestacks.ActionCreate:
-		if mode == config.NativeStacksAuto {
-			return nil // legacy cleanup for unstacked PRs
-		}
-		return fmt.Errorf("native Stacks is required but the stack is not linked; cannot abandon safely")
+		// All PRs are already unstacked, so cleanup is safe in every mode.
+		// This also permits retrying after unstack succeeded but a Git step failed.
+		return nil
 	case nativestacks.ActionConflict:
 		return fmt.Errorf("native membership conflict blocks abandon: %s", result.Conflict)
 	case nativestacks.ActionAppend:
@@ -127,15 +126,17 @@ func abandonImpl(app *AppContext) error {
 		return nil
 	}
 
-	// 4. Native unstack preflight before any local mutation.
+	// 4. Read PR metadata before checking native membership. Discover only
+	// populates commit headers, so checking HasPR before this would skip unstack.
+	for _, e := range st {
+		e.ReadMetadata()
+	}
+	// Native unstack preflight before any local mutation.
 	if err := nativeAbandonPreflight(app, st); err != nil {
 		return err
 	}
 
-	// 5. Read metadata; for entries lacking heads, assign new ones from the template.
-	for _, e := range st {
-		e.ReadMetadata()
-	}
+	// 5. For entries lacking heads, assign new ones from the template.
 	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}
