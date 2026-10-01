@@ -127,15 +127,17 @@ func abandonImpl(app *AppContext) error {
 		return nil
 	}
 
-	// 4. Native unstack preflight before any local mutation.
+	// 4. Read PR metadata before checking native membership. Discover only
+	// populates commit headers, so checking HasPR before this would skip unstack.
+	for _, e := range st {
+		e.ReadMetadata()
+	}
+	// Native unstack preflight before any local mutation.
 	if err := nativeAbandonPreflight(app, st); err != nil {
 		return err
 	}
 
-	// 5. Read metadata; for entries lacking heads, assign new ones from the template.
-	for _, e := range st {
-		e.ReadMetadata()
-	}
+	// 5. For entries lacking heads, assign new ones from the template.
 	if err := app.Git.Fetch(app.Args.Remote); err != nil {
 		return err
 	}

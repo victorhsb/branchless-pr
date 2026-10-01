@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -533,5 +534,94 @@ func TestSubmitRejectsInvalidKeepBranchesBeforeGit(t *testing.T) {
 	}
 	if len(run.Calls()) != 0 {
 		t.Fatal("invalid setting must not execute Git commands")
+	}
+}
+
+// Strict ordered fakes verify that a failed mutation prevents later writes.
+
+func TestSubmitStopsAfterMutationFailure(t *testing.T) {
+	const head = "alice/stack/1"
+	const sha = "1111111111111111111111111111111111111111"
+	const url = "https://github.com/acme/widget/pull/1"
+	for _, optimized := range []bool{false, true} {
+		steps := []shelltest.Response{
+			{Name: "read current branch", Match: shelltest.Exact("git", "rev-parse", "--abbrev-ref", "HEAD"), Stdout: "feature"},
+			{Name: "create generated branch", Match: shelltest.Exact("git", "branch", "-f", head, sha)},
+			{Name: "check ancestry", Match: shelltest.Exact("git", "merge-base", "--is-ancestor", head, "feature")},
+			{Name: "initial push", Match: shelltest.Exact("git", "push", "-f", "--", "origin", head+":"+head)},
+			{Name: "create PR", Match: shelltest.Prefix("gh", "pr", "create"), Stdout: url},
+		}
+		if !optimized {
+			steps = append(steps, shelltest.Response{Name: "verify PR", Match: shelltest.Prefix("gh", "pr", "view"), Stdout: `{"number":1,"state":"OPEN","headRefName":"alice/stack/1"}`})
+		}
+		steps = append(steps,
+			shelltest.Response{Name: "checkout metadata branch", Match: shelltest.Exact("git", "checkout", head)},
+			shelltest.Response{Name: "amend metadata", Match: shelltest.Exact("git", "commit", "--amend", "-F", "-")},
+			shelltest.Response{Name: "push metadata", Match: shelltest.Exact("git", "push", "-f", "--", "origin", head+":"+head)},
+			shelltest.Response{Name: "edit PR", Match: shelltest.Prefix("gh", "pr", "edit")},
+			shelltest.Response{Name: "rebase original branch", Match: shelltest.Exact("git", "rebase", "--committer-date-is-author-date", head, "feature")},
+		)
+		if optimized {
+			// A new single-PR stack already has its final body, so the optimized
+			// engine correctly skips the edit.
+			steps = append(steps[:len(steps)-2], steps[len(steps)-1])
+		}
+		for stop := range steps {
+			// Read-only failures are covered by verification tests; focus on mutations.
+			if steps[stop].Name == "read current branch" || steps[stop].Name == "check ancestry" {
+				continue
+			}
+			t.Run(fmt.Sprintf("optimized=%v/%s", optimized, steps[stop].Name), func(t *testing.T) {
+				sentinel := errors.New("mutation denied")
+				responses := append([]shelltest.Response(nil), steps[:stop+1]...)
+				responses[stop].Err = sentinel
+				run := shelltest.New(t, responses...)
+				e := &stack.Entry{Commit: &stack.Header{SHA: sha, Title: "change", Body: "body\n"}}
+				e.SetHead(head)
+				e.SetBase("main")
+				app := &AppContext{Git: git.New("", run), PR: pr.NewClient(run), OrigBranch: "feature", Args: CommonArgs{Remote: "origin", Target: "main"}}
+				apply := applyMutations
+				if optimized {
+					apply = applyMutationsOptimized
+				}
+				err := apply(app, stack.Stack{e}, []bool{true}, []bool{false}, submitOptions{}, nil, nil)
+				if err == nil || !strings.Contains(err.Error(), sentinel.Error()) {
+					t.Fatalf("error=%v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestSubmitNativePreflightBlocksMutations(t *testing.T) {
+	var commits []string
+	for _, n := range []int{2, 1} {
+		sha := strings.Repeat(fmt.Sprint(n), 40)
+		commits = append(commits, strings.Join([]string{sha, "tree " + strings.Repeat("3", 40), "author Test User <test@example.com> 1 +0000", "committer Test User <test@example.com> 1 +0000", "", fmt.Sprintf("    change %d", n), "", fmt.Sprintf("    stack-info: PR: https://github.com/acme/widget/pull/%d, branch: alice/stack/%d", n, n)}, "\n"))
+	}
+	// A membership read failure must stop before fetch, metadata rewriting,
+	// merging, force-pushing, or branch deletion.
+	responses := []shelltest.Response{}
+	responses = append(responses,
+		shelltest.Response{Match: shelltest.Exact("git", "rev-parse", "--git-path", "rebase-merge"), Stdout: "/nonexistent/bpr-test/rebase-merge"},
+		shelltest.Response{Match: shelltest.Exact("git", "rev-parse", "--git-path", "rebase-apply"), Stdout: "/nonexistent/bpr-test/rebase-apply"},
+		shelltest.Response{Match: shelltest.Exact("git", "merge-base", "--is-ancestor", "main", "origin/main"), ExitCode: 1},
+	)
+	responses = append(responses, shelltest.Response{Match: shelltest.Exact("git", "rev-list", "--header", "^main", "HEAD"), Stdout: strings.Join(commits, "\x00")})
+	responses = append(responses,
+		shelltest.Response{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		shelltest.Response{Match: shelltest.Exact("git", "ls-remote", "--heads", "--", "origin")},
+	)
+	responses = append(responses,
+		shelltest.Response{Match: shelltest.Exact("git", "remote", "get-url", "--", "origin"), Stdout: "https://github.com/acme/widget.git"},
+		shelltest.Response{Match: shelltest.Exact("gh", "api", "--include", "--method", "GET", "repos/acme/widget"), Stdout: "HTTP/2.0 403 Forbidden\n\n{\"message\":\"access denied\"}", ExitCode: 1},
+	)
+	run := shelltest.New(t, responses...)
+	cfg := config.Defaults()
+	cfg.Set("github", "native_stacks", "required")
+	app := &AppContext{Config: cfg, Git: git.New("", run), PR: pr.NewClient(run), OrigBranch: "feature", Args: CommonArgs{Base: "main", Head: "HEAD", Target: "main", Remote: "origin", BranchNameTemplate: "$USERNAME/stack/$ID"}}
+	err := submitImpl(app, submitOptions{})
+	if err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("error=%v", err)
 	}
 }

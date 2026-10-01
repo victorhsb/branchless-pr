@@ -293,9 +293,13 @@ func landWholeStackImpl(app *AppContext, st stack.Stack) error {
 }
 
 // landCleanup restores the original branch, deletes local stack branches, and
-// rebases the local target plus original branch onto REMOTE/TARGET. Shared
-// between bottom-only and whole-stack landing.
+// rebases the local target plus original branch onto the merged remote target.
 func landCleanup(app *AppContext, st stack.Stack) error {
+	// The squash merge advances the remote target. In a single-entry stack
+	// there is no remaining-entry rebase to fetch it before cleanup.
+	if err := app.Git.Fetch(app.Args.Remote); err != nil {
+		return err
+	}
 	if err := app.Git.CheckoutBranch(app.OrigBranch); err != nil {
 		return fmt.Errorf("ERROR: Cannot checkout original branch: %w", err)
 	}

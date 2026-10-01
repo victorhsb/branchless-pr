@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -361,5 +362,95 @@ func TestLandBottomOnlyChecksOutRemainingEntryFromRemoteBranch(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "stop after remaining checkout") {
 		t.Fatalf("error = %v, want remaining checkout sentinel", err)
+	}
+}
+
+func TestLandBottomStopsBeforeCleanupOnFailure(t *testing.T) {
+	const head = "alice/stack/1"
+	const url = "https://github.com/acme/widget/pull/1"
+	steps := []shelltest.Response{
+		{Name: "fetch", Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		{Name: "checkout bottom", Match: shelltest.Exact("git", "checkout", "origin/"+head, "-B", head)},
+		{Name: "retarget bottom", Match: shelltest.Exact("gh", "pr", "edit", url, "-B", "main")},
+		{Name: "squash merge", Match: shelltest.Exact("gh", "pr", "merge", url, "--squash", "-t", "land test (#1)", "-F", "-")},
+		{Name: "fetch remaining", Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		{Name: "checkout remaining", Match: shelltest.Exact("git", "checkout", "origin/alice/stack/2", "-B", "alice/stack/2")},
+		{Name: "rebase remaining", Match: shelltest.Exact("git", "rebase", "--committer-date-is-author-date", "origin/main", "alice/stack/2")},
+		{Name: "push remaining", Match: shelltest.Exact("git", "push", "-f", "--", "origin", "alice/stack/2:alice/stack/2")},
+		{Name: "retarget remaining", Match: shelltest.Exact("gh", "pr", "edit", "https://github.com/acme/widget/pull/2", "-B", "main")},
+		{Name: "refresh merged target", Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")},
+		{Name: "restore original", Match: shelltest.Exact("git", "checkout", "feature")},
+	}
+	for stop := range steps {
+		t.Run(steps[stop].Name, func(t *testing.T) {
+			sentinel := errors.New("landing denied")
+			responses := append([]shelltest.Response(nil), steps[:stop+1]...)
+			responses[stop].Err = sentinel
+			run := shelltest.New(t, responses...)
+			e := entryForLandTest(head, url)
+			e.Commit.Body = "user body\n\nstack-info: PR: " + url + ", branch: " + head + "\n"
+			err := landBottomOnly(&AppContext{Git: git.New("", run), PR: pr.NewClient(run), OrigBranch: "feature", Args: CommonArgs{Remote: "origin", Target: "main"}}, stack.Stack{e, entryForLandTest("alice/stack/2", "https://github.com/acme/widget/pull/2")})
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("error=%v", err)
+			}
+			for _, call := range run.Calls() {
+				if len(call.Args) > 2 && call.Args[0] == "gh" && call.Args[2] == "merge" && string(call.Opts.Stdin) != "user body" {
+					t.Fatalf("squash body includes metadata: %q", call.Opts.Stdin)
+				}
+			}
+		})
+	}
+}
+
+func TestLandCleanupRefreshesTargetBeforeDeletingBranches(t *testing.T) {
+	for _, failFetch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fetch fails=%v", failFetch), func(t *testing.T) {
+			sentinel := errors.New("fetch denied")
+			responses := []shelltest.Response{{Match: shelltest.Exact("git", "fetch", "--prune", "--", "origin")}}
+			if failFetch {
+				responses[0].Err = sentinel
+			} else {
+				responses = append(responses,
+					shelltest.Response{Match: shelltest.Exact("git", "checkout", "feature")},
+					shelltest.Response{Match: shelltest.Exact("git", "branch", "-D", "alice/stack/1")},
+					shelltest.Response{Match: shelltest.Exact("git", "show-ref", "-q", "refs/heads/main")},
+					shelltest.Response{Match: shelltest.Exact("git", "rebase", "origin/main", "main")},
+					shelltest.Response{Match: shelltest.Exact("git", "rebase", "origin/main", "feature")},
+				)
+			}
+			run := shelltest.New(t, responses...)
+			err := landCleanup(&AppContext{Git: git.New("", run), OrigBranch: "feature", Args: CommonArgs{Remote: "origin", Target: "main"}}, stack.Stack{entryForLandTest("alice/stack/1", "https://github.com/acme/widget/pull/1")})
+			if failFetch {
+				if !errors.Is(err, sentinel) {
+					t.Fatalf("error=%v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestLandNativePreflightBlocksMutations(t *testing.T) {
+	var commits []string
+	for _, n := range []int{2, 1} {
+		sha := strings.Repeat(fmt.Sprint(n), 40)
+		commits = append(commits, strings.Join([]string{sha, "tree " + strings.Repeat("3", 40), "author Test User <test@example.com> 1 +0000", "committer Test User <test@example.com> 1 +0000", "", fmt.Sprintf("    change %d", n), "", fmt.Sprintf("    stack-info: PR: https://github.com/acme/widget/pull/%d, branch: alice/stack/%d", n, n)}, "\n"))
+	}
+	// A membership read failure must stop before fetch, metadata rewriting,
+	// merging, force-pushing, or branch deletion.
+	responses := []shelltest.Response{}
+	responses = append(responses, shelltest.Response{Match: shelltest.Exact("git", "rev-list", "--header", "^main", "HEAD"), Stdout: strings.Join(commits, "\x00")})
+	responses = append(responses,
+		shelltest.Response{Match: shelltest.Exact("git", "remote", "get-url", "--", "origin"), Stdout: "https://github.com/acme/widget.git"},
+		shelltest.Response{Match: shelltest.Exact("gh", "api", "--include", "--method", "GET", "repos/acme/widget"), Stdout: "HTTP/2.0 403 Forbidden\n\n{\"message\":\"access denied\"}", ExitCode: 1},
+	)
+	run := shelltest.New(t, responses...)
+	cfg := config.Defaults()
+	cfg.Set("github", "native_stacks", "required")
+	app := &AppContext{Config: cfg, Git: git.New("", run), PR: pr.NewClient(run), OrigBranch: "feature", Args: CommonArgs{Base: "main", Head: "HEAD", Target: "main", Remote: "origin", BranchNameTemplate: "$USERNAME/stack/$ID"}}
+	err := landImpl(app, "bottom-only")
+	if err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("error=%v", err)
 	}
 }

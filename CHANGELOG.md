@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed `abandon` skipping native Stack safety checks because commit PR metadata
+  had not yet been loaded. Native unstack must now permit cleanup before any
+  local rewriting or generated branch deletion.
+- Fixed single-PR `land` leaving local branches behind the merged target.
+  Cleanup now fetches the remote target before rebasing local branches.
+
 ## v1.13.0 - 2026-09-16
 
 - Added `bpr ci-watch`, a stack-scoped CI watcher for agent-driven monitoring.
