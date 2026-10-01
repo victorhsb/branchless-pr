@@ -81,10 +81,9 @@ func nativeAbandonPreflight(app *AppContext, st stack.Stack) error {
 		}
 		return nil
 	case nativestacks.ActionCreate:
-		if mode == config.NativeStacksAuto {
-			return nil // legacy cleanup for unstacked PRs
-		}
-		return fmt.Errorf("native Stacks is required but the stack is not linked; cannot abandon safely")
+		// All PRs are already unstacked, so cleanup is safe in every mode.
+		// This also permits retrying after unstack succeeded but a Git step failed.
+		return nil
 	case nativestacks.ActionConflict:
 		return fmt.Errorf("native membership conflict blocks abandon: %s", result.Conflict)
 	case nativestacks.ActionAppend:

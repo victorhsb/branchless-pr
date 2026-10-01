@@ -24,6 +24,7 @@ type lifecycleFixture struct {
 	fail              string
 	queue             bool
 	incompleteUnstack bool
+	unstacked         bool
 	failGit           string
 }
 
@@ -226,7 +227,11 @@ func (f *lifecycleFixture) nativeAPI(args []string, method string) (string, erro
 			f.t.Fatalf("unexpected native PR endpoint: %s", endpoint)
 		}
 		p := f.prs[n-1]
-		body := fmt.Sprintf(`{"number":%d,"state":"open","draft":false,"merged_at":null,"head":{"ref":%q,"sha":"head-sha","repo":{"full_name":"acme/widget"}},"base":{"ref":%q,"sha":"base-sha","repo":{"full_name":"acme/widget"}},"stack":{"id":7,"number":7,"size":2,"position":%d,"base":{"ref":"main","sha":"base-sha"}}}`, n, p.HeadRefName, p.BaseRefName, n)
+		membership := "null"
+		if !f.unstacked {
+			membership = fmt.Sprintf(`{"id":7,"number":7,"size":2,"position":%d,"base":{"ref":"main","sha":"base-sha"}}`, n)
+		}
+		body := fmt.Sprintf(`{"number":%d,"state":"open","draft":false,"merged_at":null,"head":{"ref":%q,"sha":"head-sha","repo":{"full_name":"acme/widget"}},"base":{"ref":%q,"sha":"base-sha","repo":{"full_name":"acme/widget"}},"stack":%s}`, n, p.HeadRefName, p.BaseRefName, membership)
 		return response(200, body)
 	case endpoint == "repos/acme/widget/stacks/7":
 		return response(200, f.nativeStackBody())
@@ -234,6 +239,7 @@ func (f *lifecycleFixture) nativeAPI(args []string, method string) (string, erro
 		if f.incompleteUnstack {
 			return response(200, f.nativeStackBody())
 		}
+		f.unstacked = true
 		return response(204, "")
 	default:
 		f.t.Fatalf("unexpected native API: %v", args)

@@ -99,3 +99,59 @@ func TestAbandonNativeSafetyE2E(t *testing.T) {
 		})
 	}
 }
+
+func TestAbandonRetriesAfterNativeUnstackE2E(t *testing.T) {
+	for _, stage := range []string{"fetch", "checkout", "amend", "rebase"} {
+		t.Run(stage, func(t *testing.T) {
+			f := newLifecycleFixture(t)
+			f.mustInvoke("submit")
+			f.enableNative()
+			tree := f.gitRun(f.repo, "rev-parse", "HEAD^{tree}")
+			before := f.remoteRefs()
+			switch stage {
+			case "fetch":
+				f.failGit = "fetch --prune"
+			case "checkout":
+				f.failGit = "checkout " + f.gitRun(f.repo, "rev-parse", "HEAD~1") + " -B"
+			case "amend":
+				f.failGit = "commit --amend"
+			case "rebase":
+				f.failGit = "rebase --committer-date-is-author-date"
+			}
+			if err := f.invoke("abandon"); err == nil || !strings.Contains(err.Error(), "injected Git failure") {
+				t.Fatalf("first attempt error=%v", err)
+			}
+			if !f.unstacked {
+				t.Fatal("failure did not occur after successful native unstack")
+			}
+			f.assertRestored()
+			if f.remoteRefs() != before {
+				t.Fatal("failed rewrite deleted remote branches")
+			}
+			f.failGit = ""
+			f.mustInvoke("abandon")
+			f.assertRestored()
+			if f.gitRun(f.repo, "rev-parse", "HEAD^{tree}") != tree {
+				t.Fatal("retry changed file content")
+			}
+			if strings.Contains(f.gitRun(f.repo, "log", "main..HEAD", "--format=%B"), "stack-info:") {
+				t.Fatal("retry left stack metadata")
+			}
+			if strings.Contains(f.remoteRefs(), "refs/heads/alice/stack/") {
+				t.Fatal("retry left generated remote branches")
+			}
+			if f.gitRun(f.repo, "branch", "--format=%(refname:short)") != "feature\nmain" {
+				t.Fatal("retry left generated local branches")
+			}
+			unstacks := 0
+			for _, call := range f.calls {
+				if strings.Contains(strings.Join(call, " "), "stacks/7/unstack") {
+					unstacks++
+				}
+			}
+			if unstacks != 1 {
+				t.Fatalf("unstack requests=%d, want one completed unstack", unstacks)
+			}
+		})
+	}
+}

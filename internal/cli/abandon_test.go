@@ -11,6 +11,7 @@ import (
 	"github.com/victorhsb/branchless-pr/internal/pr"
 	"github.com/victorhsb/branchless-pr/internal/shell"
 	"github.com/victorhsb/branchless-pr/internal/shell/shelltest"
+	"github.com/victorhsb/branchless-pr/internal/stack"
 )
 
 func TestAbandonChecksOutGeneratedBranchFromCommit(t *testing.T) {
@@ -111,5 +112,32 @@ func TestAbandonNativePreflightBlocksMutations(t *testing.T) {
 	err := abandonImpl(app)
 	if err == nil || !strings.Contains(err.Error(), "access denied") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestNativeAbandonAllowsAlreadyUnstackedPRs(t *testing.T) {
+	for _, mode := range []string{"auto", "required"} {
+		t.Run(mode, func(t *testing.T) {
+			responses := []shelltest.Response{
+				{Match: shelltest.Exact("git", "remote", "get-url", "--", "origin"), Stdout: "https://github.com/acme/widget.git"},
+				{Match: shelltest.Exact("gh", "api", "--include", "--method", "GET", "repos/acme/widget"), Stdout: "HTTP/2.0 200 OK\n\n{}"},
+				{Match: shelltest.Exact("gh", "api", "--include", "--method", "GET", "repos/acme/widget/stacks?per_page=1"), Stdout: "HTTP/2.0 200 OK\n\n[]"},
+			}
+			var st stack.Stack
+			for _, n := range []int{1, 2} {
+				responses = append(responses, shelltest.Response{
+					Match:  shelltest.Exact("gh", "api", "--include", "--method", "GET", fmt.Sprintf("repos/acme/widget/pulls/%d", n)),
+					Stdout: fmt.Sprintf(`HTTP/2.0 200 OK`+"\n\n"+`{"number":%d,"state":"open","draft":false,"merged_at":null,"head":{"ref":"branch-%d","sha":"head-sha"},"base":{"ref":"main","sha":"base-sha"},"stack":null}`, n, n),
+				})
+				st = append(st, entryForLandTest(fmt.Sprintf("alice/stack/%d", n), fmt.Sprintf("https://github.com/acme/widget/pull/%d", n)))
+			}
+			run := shelltest.New(t, responses...)
+			cfg := config.Defaults()
+			cfg.Set("github", "native_stacks", mode)
+			app := &AppContext{Config: cfg, Git: git.New("", run), PR: pr.NewClient(run), Args: CommonArgs{Remote: "origin"}}
+			if err := nativeAbandonPreflight(app, st); err != nil {
+				t.Fatalf("already-unstacked PRs should permit cleanup: %v", err)
+			}
+		})
 	}
 }
